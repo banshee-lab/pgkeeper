@@ -1,0 +1,417 @@
+openapi: 3.0.3
+info:
+  title: pgkeeper API
+  version: 1.0.0
+  description: >
+    Scheduler and API for PostgreSQL backups (pg_dump via docker exec -> restic).
+    When OIDC is configured, /api/v1 routes require the pgkeeper_session cookie.
+servers:
+  - url: /
+tags:
+  - name: health
+  - name: auth
+  - name: backups
+  - name: activities
+  - name: jobs
+
+security:
+  - sessionCookie: []
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness/readiness
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, example: ok }
+
+  /auth/login:
+    get:
+      tags: [auth]
+      summary: Start OIDC login (redirects to the IdP)
+      security: []
+      parameters:
+        - name: redirect_to
+          in: query
+          description: Relative path to return to after login
+          schema: { type: string, example: /backups }
+      responses:
+        '302': { description: Redirect to the identity provider }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /auth/callback:
+    get:
+      tags: [auth]
+      summary: OIDC callback (sets the session cookie)
+      security: []
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        '302': { description: Redirect to the original page, cookie set }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Destroy the session
+      responses:
+        '204': { description: Logged out }
+
+  /api/v1/me:
+    get:
+      tags: [auth]
+      summary: Current user / auth status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /api/v1/backups:
+    get:
+      tags: [backups]
+      summary: List configured backups
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Backup' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /api/v1/backups/{name}:
+    parameters:
+      - $ref: '#/components/parameters/BackupName'
+    get:
+      tags: [backups]
+      summary: Backup details
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Backup' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/backups/{name}/activities:
+    parameters:
+      - $ref: '#/components/parameters/BackupName'
+    get:
+      tags: [backups, activities]
+      summary: Last activities of one backup (max 10)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/ActivityList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/backups/{name}/run:
+    parameters:
+      - $ref: '#/components/parameters/BackupName'
+    post:
+      tags: [backups]
+      summary: Fire a backup manually
+      responses:
+        '202':
+          description: Accepted; execution started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Activity' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Backup already running
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/activities:
+    get:
+      tags: [activities]
+      summary: Last activities across all backups (max 10)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/ActivityList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /api/v1/activities/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ActivityId'
+    get:
+      tags: [activities]
+      summary: Activity details
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Activity' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/activities/{id}/log:
+    parameters:
+      - $ref: '#/components/parameters/ActivityId'
+    get:
+      tags: [activities]
+      summary: Full execution log (content so far if still running)
+      responses:
+        '200':
+          description: Log text
+          content:
+            text/plain:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/activities/{id}/log/stream:
+    parameters:
+      - $ref: '#/components/parameters/ActivityId'
+      - name: Last-Event-ID
+        in: header
+        description: Resume after this log line number
+        schema: { type: integer, minimum: 0 }
+    get:
+      tags: [activities]
+      summary: SSE stream of the execution log
+      description: >
+        Events: `log` (data: LogLine, id: line number) and `end` (data: LogEnd).
+        Replays existing lines, then follows live; closes after `end`.
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/jobs:
+    get:
+      tags: [jobs]
+      summary: Currently running executions
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Job' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /api/v1/jobs/stream:
+    get:
+      tags: [jobs]
+      summary: SSE stream of job state changes
+      description: >
+        Events: `snapshot` (JobList, once on connect), `job.started` (Job),
+        `job.phase` (Job), `job.finished` (JobFinished).
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: pgkeeper_session
+
+  parameters:
+    BackupName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$' }
+    ActivityId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      description: Max items (1-10, clamped to 10)
+      schema: { type: integer, minimum: 1, maximum: 10, default: 10 }
+
+  responses:
+    ActivityList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items:
+                type: array
+                maxItems: 10
+                items: { $ref: '#/components/schemas/Activity' }
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthenticated:
+      description: Missing or expired session
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [invalid_request, unauthenticated, backup_not_found, activity_not_found, log_not_found, backup_running, internal_error, not_implemented]
+            message: { type: string }
+
+    ActivityStatus:
+      type: string
+      enum: [running, success, error]
+
+    Trigger:
+      type: string
+      enum: [schedule, manual]
+
+    Phase:
+      type: string
+      enum: [dump, roles, restic, cleanup]
+
+    Activity:
+      type: object
+      required: [id, backup_name, database, triggered_by, status, started_at, finished_at, duration_ms, error, log_url]
+      properties:
+        id: { type: string, format: uuid }
+        backup_name: { type: string }
+        database: { type: string }
+        triggered_by: { $ref: '#/components/schemas/Trigger' }
+        status: { $ref: '#/components/schemas/ActivityStatus' }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        duration_ms: { type: integer, format: int64, nullable: true }
+        error: { type: string, nullable: true }
+        log_url: { type: string }
+
+    ResticView:
+      type: object
+      required: [repository, tag]
+      properties:
+        repository: { type: string, description: Credentials embedded in the URL are redacted }
+        tag: { type: string }
+        keep_daily: { type: integer }
+        keep_weekly: { type: integer }
+        keep_monthly: { type: integer }
+        keep_yearly: { type: integer }
+
+    Backup:
+      type: object
+      required: [name, cron, container, database, username, host, port, roles, restic, running, next_run, last_activity]
+      properties:
+        name: { type: string }
+        cron: { type: string }
+        container: { type: string }
+        database: { type: string }
+        username: { type: string }
+        host: { type: string }
+        port: { type: integer }
+        roles: { type: boolean }
+        restic: { $ref: '#/components/schemas/ResticView' }
+        running: { type: boolean }
+        next_run: { type: string, format: date-time, nullable: true }
+        last_activity:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Activity'
+
+    Job:
+      type: object
+      required: [activity_id, backup_name, database, triggered_by, status, phase, started_at]
+      properties:
+        activity_id: { type: string, format: uuid }
+        backup_name: { type: string }
+        database: { type: string }
+        triggered_by: { $ref: '#/components/schemas/Trigger' }
+        status: { type: string, enum: [running] }
+        phase: { $ref: '#/components/schemas/Phase' }
+        started_at: { type: string, format: date-time }
+
+    JobFinished:
+      type: object
+      required: [job, activity]
+      properties:
+        job: { $ref: '#/components/schemas/Job' }
+        activity: { $ref: '#/components/schemas/Activity' }
+
+    LogLine:
+      type: object
+      required: [line]
+      properties:
+        line: { type: string }
+
+    LogEnd:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [success, error] }
+        error: { type: string }
+
+    Me:
+      type: object
+      required: [auth_enabled, authenticated, user]
+      properties:
+        auth_enabled: { type: boolean }
+        authenticated: { type: boolean }
+        user:
+          nullable: true
+          type: object
+          properties:
+            subject: { type: string }
+            email: { type: string }
+            name: { type: string }
