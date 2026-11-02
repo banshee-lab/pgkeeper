@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/banshee-lab/pgkeeper/internal/api"
+	"github.com/banshee-lab/pgkeeper/internal/auth"
 	"github.com/banshee-lab/pgkeeper/internal/backup"
 	"github.com/banshee-lab/pgkeeper/internal/config"
 	"github.com/banshee-lab/pgkeeper/internal/domain"
@@ -55,6 +57,9 @@ func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log 
 	}
 	vcancel()
 
+	jobHub := events.NewHub[events.JobEvent]()
+	logHub := events.NewHub[logstore.LogLine]()
+
 	runner := backup.NewRunner(backup.Deps{
 		Catalog:    cfg,
 		Global:     cfg.Global,
@@ -62,13 +67,27 @@ func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log 
 		Exec:       docker,
 		Restic:     resticCLI,
 		Notifier:   notifier,
-		JobHub:     events.NewHub[events.JobEvent](),
-		LogHub:     events.NewHub[logstore.LogLine](),
+		JobHub:     jobHub,
+		LogHub:     logHub,
 		Logger:     log,
 	})
 
 	if runOnce != "" {
 		return runOneShot(ctx, runner, activities, runOnce, log)
+	}
+
+	// OIDC: fail fast. Auth configured but unusable must never silently open the API.
+	var authSvc *auth.Service
+	if cfg.Auth != nil {
+		sessions := store.NewSessionStore(db)
+		authSvc, err = auth.New(ctx, *cfg.Auth, sessions)
+		if err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
+		if !cfg.Auth.CookieSecure {
+			log.Warn("auth.cookie_secure=false: session cookie is sent over plain HTTP (local development only)")
+		}
+		go authSvc.RunCleanup(ctx, time.Hour, log)
 	}
 
 	sched, err := scheduler.New(cfg.Global.Location, cfg.Backups, runner, log)
@@ -82,12 +101,22 @@ func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log 
 	h := api.NewHandler(api.Deps{
 		DB:         db,
 		Activities: activities,
-		Sessions:   store.NewSessionStore(db),
 		Catalog:    cfg,
 		Runner:     runner,
+		Scheduler:  sched,
+		JobHub:     jobHub,
+		LogHub:     logHub,
+		Auth:       authSvc,
+		AppCtx:     ctx,
 		Logger:     log,
 	})
 	srv := api.NewServer(cfg.Global.Listen, api.NewRouter(h))
+
+	// Request contexts derive from baseCtx so open SSE streams can be ended on
+	// shutdown (http.Server.Shutdown does not cancel them by itself).
+	baseCtx, baseCancel := context.WithCancel(context.Background())
+	defer baseCancel()
+	srv.BaseContext = func(net.Listener) context.Context { return baseCtx }
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -111,6 +140,7 @@ func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log 
 	if err := runner.Shutdown(sctx); err != nil {
 		log.Warn("runner shutdown", "err", err)
 	}
+	baseCancel() // ends SSE handlers
 	hctx, hcancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer hcancel()
 	if err := srv.Shutdown(hctx); err != nil {
