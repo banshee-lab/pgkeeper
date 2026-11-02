@@ -46,12 +46,21 @@ func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log 
 	}
 	cancel()
 
+	resticCLI := restic.New(cfg.Global.TempPath)
+	vctx, vcancel := context.WithTimeout(ctx, 5*time.Second)
+	if v, err := resticCLI.CheckVersion(vctx); err != nil {
+		log.Warn("restic check failed (continuing)", "version", v, "err", err)
+	} else {
+		log.Info("restic available", "version", v)
+	}
+	vcancel()
+
 	runner := backup.NewRunner(backup.Deps{
 		Catalog:    cfg,
 		Global:     cfg.Global,
 		Activities: activities,
 		Exec:       docker,
-		Restic:     restic.Noop{}, // phase 4
+		Restic:     resticCLI,
 		Notifier:   notifier,
 		JobHub:     events.NewHub[events.JobEvent](),
 		LogHub:     events.NewHub[logstore.LogLine](),

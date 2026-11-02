@@ -34,6 +34,7 @@ func envOr(key, def string) string {
 func run() error {
 	configPath := flag.String("config", envOr("PGKEEPER_CONFIG", "/etc/pgkeeper/pgkeeper.toml"), "path to the TOML config")
 	check := flag.Bool("check", false, "validate the config, print a summary and exit")
+	checkRestic := flag.Bool("check-restic", false, "run 'restic cat config' for every distinct repository and exit")
 	notifyTest := flag.Bool("notify-test", false, "send a test Telegram message and exit")
 	runName := flag.String("run", "", "run one backup immediately and exit (0 = success)")
 	flag.Parse()
@@ -53,6 +54,11 @@ func run() error {
 	if *check {
 		fmt.Print(cfg.LogSafe())
 		return nil
+	}
+	if *checkRestic {
+		cctx, cstop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer cstop()
+		return app.CheckRestic(cctx, cfg, os.Stdout)
 	}
 	log.Info("config loaded", "summary", cfg.LogSafe())
 
