@@ -1,9 +1,11 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,6 +119,32 @@ func TestSuccess(t *testing.T) {
 	}
 	if len(n.calls) != 0 {
 		t.Fatal("no notification expected on success")
+	}
+}
+
+func TestLogsBackupLifecycle(t *testing.T) {
+	r, _, _ := setup(t, okDump, false)
+	var logs bytes.Buffer
+	r.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+
+	act, err := r.Run(context.Background(), "a", domain.TriggerManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.wg.Wait()
+
+	for _, want := range []string{
+		"backup run started",
+		"backup phase started",
+		"backup phase completed",
+		"backup run completed",
+		act.ID.String(),
+		"\"trigger\":\"manual\"",
+		"\"phase\":\"dump\"",
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("logs missing %q:\n%s", want, logs.String())
+		}
 	}
 }
 

@@ -110,6 +110,12 @@ func (r *Runner) Run(ctx context.Context, name string, by domain.Trigger) (*doma
 		r.wg.Done()
 		return nil, fmt.Errorf("create activity: %w", err)
 	}
+	r.Logger.Info("backup run started",
+		"activity", act.ID,
+		"backup", cfg.Name,
+		"database", cfg.Database,
+		"trigger", by,
+		"log_path", act.LogPath)
 	r.JobHub.Publish(events.JobEvent{Type: events.JobStarted, Job: job, Activity: act})
 
 	go r.execute(cfg, act)
@@ -124,7 +130,7 @@ type execLog interface {
 
 type discardLog struct{}
 
-func (discardLog) Write(p []byte) (int, error)  { return len(p), nil }
+func (discardLog) Write(p []byte) (int, error) { return len(p), nil }
 func (discardLog) Logf(string, string, ...any) {}
 
 func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
@@ -135,7 +141,11 @@ func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
 	var lg execLog = discardLog{}
 	closeLog := func() {}
 	if w, err := logstore.Open(act.LogPath, act.ID, r.LogHub); err != nil {
-		r.Logger.Error("open execution log", "backup", cfg.Name, "path", act.LogPath, "err", err)
+		r.Logger.Error("open execution log",
+			"activity", act.ID,
+			"backup", cfg.Name,
+			"path", act.LogPath,
+			"err", err)
 	} else {
 		lg, closeLog = w, func() { _ = w.Close() }
 	}
@@ -156,8 +166,23 @@ func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
 	}
 	if runErr != nil {
 		lg.Logf("ERROR", "execution finished: status=error err=%s", act.Error)
+		r.Logger.Error("backup run failed",
+			"activity", act.ID,
+			"backup", cfg.Name,
+			"database", cfg.Database,
+			"trigger", act.TriggeredBy,
+			"duration", finished.Sub(act.StartedAt),
+			"log_path", act.LogPath,
+			"err", act.Error)
 	} else {
 		lg.Logf("INFO", "execution finished: status=success elapsed=%s", finished.Sub(act.StartedAt).Round(time.Millisecond))
+		r.Logger.Info("backup run completed",
+			"activity", act.ID,
+			"backup", cfg.Name,
+			"database", cfg.Database,
+			"trigger", act.TriggeredBy,
+			"duration", finished.Sub(act.StartedAt),
+			"log_path", act.LogPath)
 	}
 	closeLog() // flush before the notifier reads the tail
 
@@ -165,7 +190,10 @@ func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := r.Activities.Finish(fctx, act.ID, act.Status, finished, act.Error); err != nil {
-		r.Logger.Error("finish activity", "activity", act.ID, "err", err)
+		r.Logger.Error("persist backup result",
+			"activity", act.ID,
+			"backup", cfg.Name,
+			"err", err)
 	}
 	job, _ := r.jobs.SetPhase(cfg.Name, domain.PhaseCleanup)
 	r.jobs.Release(cfg.Name)
@@ -203,6 +231,11 @@ func (r *Runner) runPhases(ctx context.Context, cfg domain.BackupConfig, act dom
 	defer func() {
 		lg.Logf("INFO", "phase %s: removing %s", domain.PhaseCleanup, tmpDir)
 		if e := os.RemoveAll(tmpDir); e != nil {
+			r.Logger.Warn("backup temporary files cleanup failed",
+				"backup", cfg.Name,
+				"activity", act.ID,
+				"path", tmpDir,
+				"err", e)
 			lg.Logf("WARN", "cleanup failed: %v", e)
 		}
 	}()
@@ -230,11 +263,29 @@ func (r *Runner) runPhases(ctx context.Context, cfg domain.BackupConfig, act dom
 }
 
 func (r *Runner) dump(ctx context.Context, cfg domain.BackupConfig, act domain.Activity, lg execLog,
-	phase domain.Phase, kind domain.DumpKind, path string) error {
+	phase domain.Phase, kind domain.DumpKind, path string) (resultErr error) {
 
 	r.setPhase(cfg, act, phase)
+	r.Logger.Info("backup phase started",
+		"activity", act.ID,
+		"backup", cfg.Name,
+		"phase", phase,
+		"container", cfg.Container,
+		"database", cfg.Database,
+		"host", cfg.Host,
+		"port", cfg.Port)
 	lg.Logf("INFO", "phase %s: start", phase)
 	start := time.Now()
+	defer func() {
+		if resultErr != nil {
+			r.Logger.Error("backup phase failed",
+				"activity", act.ID,
+				"backup", cfg.Name,
+				"phase", phase,
+				"duration", time.Since(start),
+				"err", resultErr)
+		}
+	}()
 
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
@@ -258,15 +309,36 @@ func (r *Runner) dump(ctx context.Context, cfg domain.BackupConfig, act domain.A
 		return fmt.Errorf("%s: output file is empty", phase)
 	}
 	lg.Logf("INFO", "phase %s: done size=%d bytes elapsed=%s", phase, fi.Size(), time.Since(start).Round(time.Millisecond))
+	r.Logger.Info("backup phase completed",
+		"activity", act.ID,
+		"backup", cfg.Name,
+		"phase", phase,
+		"size_bytes", fi.Size(),
+		"duration", time.Since(start))
 	return nil
 }
 
 func (r *Runner) resticPhase(ctx context.Context, cfg domain.BackupConfig, act domain.Activity, lg execLog,
-	dir string, files []string) error {
+	dir string, files []string) (resultErr error) {
 
 	r.setPhase(cfg, act, domain.PhaseRestic)
-	lg.Logf("INFO", "phase %s: start", domain.PhaseRestic)
+	r.Logger.Info("backup phase started",
+		"activity", act.ID,
+		"backup", cfg.Name,
+		"phase", domain.PhaseRestic,
+		"files", files)
 	start := time.Now()
+	defer func() {
+		if resultErr != nil {
+			r.Logger.Error("backup phase failed",
+				"activity", act.ID,
+				"backup", cfg.Name,
+				"phase", domain.PhaseRestic,
+				"duration", time.Since(start),
+				"err", resultErr)
+		}
+	}()
+	lg.Logf("INFO", "phase %s: start", domain.PhaseRestic)
 	if err := r.Restic.EnsureRepo(ctx, cfg.Restic, lg); err != nil {
 		return fmt.Errorf("restic: %w", err)
 	}
@@ -277,6 +349,11 @@ func (r *Runner) resticPhase(ctx context.Context, cfg domain.BackupConfig, act d
 		return fmt.Errorf("restic: %w", err)
 	}
 	lg.Logf("INFO", "phase %s: done elapsed=%s", domain.PhaseRestic, time.Since(start).Round(time.Millisecond))
+	r.Logger.Info("backup phase completed",
+		"activity", act.ID,
+		"backup", cfg.Name,
+		"phase", domain.PhaseRestic,
+		"duration", time.Since(start))
 	return nil
 }
 
