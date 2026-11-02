@@ -15,9 +15,10 @@ const (
 	CodeBackupRunning    = "backup_running"
 	CodeInternal         = "internal_error"
 	CodeNotImplemented   = "not_implemented"
-	CodeNotFound         = "not_found"          // add to spec
-	CodeMethodNotAllowed = "method_not_allowed" // add to spec
-	CodeUnavailable      = "unavailable"        // add to spec
+	CodeNotFound         = "not_found"
+	CodeMethodNotAllowed = "method_not_allowed"
+	CodeUnavailable      = "unavailable"
+	CodeRateLimited      = "rate_limited"
 )
 
 type errorDetail struct {

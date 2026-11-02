@@ -57,7 +57,7 @@ paths:
         - { name: code, in: query, required: true, schema: { type: string } }
         - { name: state, in: query, required: true, schema: { type: string } }
       responses:
-        '302': { description: Redirect to the original page, cookie set }
+        '302': { description: 'Redirect to the original page; cookie set' }
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /auth/logout:
@@ -138,10 +138,16 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Activity' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: Backup already running
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Server is shutting down
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -309,7 +315,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_request, unauthenticated, backup_not_found, activity_not_found, log_not_found, backup_running, internal_error, not_implemented]
+              enum: [invalid_request, unauthenticated, backup_not_found, activity_not_found, log_not_found, backup_running, internal_error, not_implemented, not_found, method_not_allowed, unavailable, rate_limited]
             message: { type: string }
 
     ActivityStatus:
