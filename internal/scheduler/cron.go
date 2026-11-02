@@ -23,6 +23,9 @@ type Cron struct {
 var _ domain.Scheduler = (*Cron)(nil)
 
 func New(loc *time.Location, backups []domain.BackupConfig, runner domain.BackupRunner, logger *slog.Logger) (*Cron, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	s := &Cron{
 		c:      cron.New(cron.WithLocation(loc), cron.WithParser(config.CronParser)),
 		ids:    make(map[string]cron.EntryID, len(backups)),
@@ -36,6 +39,7 @@ func New(loc *time.Location, backups []domain.BackupConfig, runner domain.Backup
 			return nil, fmt.Errorf("backup %q: invalid cron %q: %w", name, b.Cron, err)
 		}
 		s.ids[name] = id
+		s.log.Info("backup schedule registered", "backup", name, "cron", b.Cron)
 	}
 	return s, nil
 }
@@ -51,13 +55,20 @@ func (s *Cron) tick(name string) {
 	}
 }
 
-func (s *Cron) Start() error { s.c.Start(); return nil }
+func (s *Cron) Start() error {
+	s.c.Start()
+	s.log.Info("scheduler started", "backup_count", len(s.ids))
+	return nil
+}
 
 func (s *Cron) Stop(ctx context.Context) error {
+	s.log.Info("scheduler stopping")
 	select {
 	case <-s.c.Stop().Done():
+		s.log.Info("scheduler stopped")
 		return nil
 	case <-ctx.Done():
+		s.log.Warn("scheduler stop timed out", "err", ctx.Err())
 		return ctx.Err()
 	}
 }
