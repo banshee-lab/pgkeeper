@@ -6,17 +6,15 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/banshee-lab/pgkeeper/internal/api"
+	"github.com/banshee-lab/pgkeeper/internal/app"
 	"github.com/banshee-lab/pgkeeper/internal/config"
 	"github.com/banshee-lab/pgkeeper/internal/domain"
 	"github.com/banshee-lab/pgkeeper/internal/notify"
-	"github.com/banshee-lab/pgkeeper/internal/store"
 )
 
 func main() {
@@ -37,6 +35,7 @@ func run() error {
 	configPath := flag.String("config", envOr("PGKEEPER_CONFIG", "/etc/pgkeeper/pgkeeper.toml"), "path to the TOML config")
 	check := flag.Bool("check", false, "validate the config, print a summary and exit")
 	notifyTest := flag.Bool("notify-test", false, "send a test Telegram message and exit")
+	runName := flag.String("run", "", "run one backup immediately and exit (0 = success)")
 	flag.Parse()
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -76,43 +75,9 @@ func run() error {
 		fmt.Println("test message sent")
 		return nil
 	}
-	_ = notifier // consumed by the runner in phase 3
-
-	db, err := store.Open(cfg.Global.DBPath)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	if err := store.Migrate(db); err != nil {
-		return err
-	}
-
-	h := api.NewHandler(api.Deps{
-		DB:         db,
-		Activities: store.NewActivityStore(db),
-		Sessions:   store.NewSessionStore(db),
-		Logger:     log,
-		// Catalog: cfg, // add once api.Deps has a catalog field (see note below)
-	})
-	srv := api.NewServer(cfg.Global.Listen, api.NewRouter(h))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	errCh := make(chan error, 1)
-	go func() {
-		log.Info("listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
-	}()
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-	}
-	shCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	return srv.Shutdown(shCtx)
+	return app.Run(ctx, cfg, notifier, log, *runName)
 }
