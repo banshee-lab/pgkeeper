@@ -1,0 +1,305 @@
+package backup
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime/debug"
+	"sync"
+	"time"
+	"uuid"
+
+	"github.com/banshee-lab/pgkeeper/internal/domain"
+	"github.com/banshee-lab/pgkeeper/internal/events"
+	"github.com/banshee-lab/pgkeeper/internal/logstore"
+	"github.com/banshee-lab/pgkeeper/internal/notify"
+)
+
+var ErrShuttingDown = errors.New("runner is shutting down")
+
+type Deps struct {
+	Catalog    domain.BackupCatalog
+	Global     domain.GlobalConfig
+	Activities domain.ActivityRepository
+	Exec       domain.Executor
+	Restic     domain.ResticClient
+	Notifier   domain.Notifier
+	JobHub     *events.Hub[events.JobEvent]
+	LogHub     *events.Hub[logstore.LogLine]
+	Logger     *slog.Logger
+	Clock      func() time.Time // default time.Now
+	NewID      func() uuid.UUID // default uuid.NewV7
+}
+
+type Runner struct {
+	Deps
+	jobs     *JobTracker
+	wg       sync.WaitGroup
+	mu       sync.Mutex // guards stopping
+	stopping bool
+	ctx      context.Context // lifetime of running jobs
+	cancel   context.CancelFunc
+}
+
+var _ domain.BackupRunner = (*Runner)(nil)
+
+func NewRunner(d Deps) *Runner {
+	if d.Logger == nil {
+		d.Logger = slog.Default()
+	}
+	if d.Clock == nil {
+		d.Clock = time.Now
+	}
+	if d.NewID == nil {
+		d.NewID = func() uuid.UUID {
+			id := uuid.NewV7()
+			return id
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Runner{Deps: d, jobs: NewJobTracker(), ctx: ctx, cancel: cancel}
+}
+
+func (r *Runner) Running() []domain.Job { return r.jobs.List() }
+
+var unsafeRe = regexp.MustCompile(`[^A-Za-z0-9_.-]`)
+
+func safeName(s string) string {
+	s = unsafeRe.ReplaceAllString(s, "_")
+	if s == "" || s == "." || s == ".." {
+		return "_"
+	}
+	return s
+}
+
+// Run registers the execution and starts it in the background. ctx is only used for the DB insert.
+func (r *Runner) Run(ctx context.Context, name string, by domain.Trigger) (*domain.Activity, error) {
+	cfg, ok := r.Catalog.Get(name)
+	if !ok {
+		return nil, domain.ErrBackupUnknown
+	}
+
+	r.mu.Lock()
+	if r.stopping {
+		r.mu.Unlock()
+		return nil, ErrShuttingDown
+	}
+	r.wg.Add(1)
+	r.mu.Unlock()
+
+	id := r.NewID()
+	now := r.Clock().UTC()
+	act := domain.Activity{
+		ID: id, BackupName: name, Database: cfg.Database, TriggeredBy: by,
+		Status: domain.StatusRunning, StartedAt: now,
+		LogPath: filepath.Join(r.Global.LogPath, safeName(cfg.Database), id.String()+".log"),
+	}
+	job := domain.Job{ActivityID: id, BackupName: name, Database: cfg.Database, TriggeredBy: by, StartedAt: now}
+
+	if !r.jobs.TryStart(job) {
+		r.wg.Done()
+		return nil, domain.ErrBackupRunning
+	}
+	if err := r.Activities.Create(ctx, &act); err != nil {
+		r.jobs.Release(name)
+		r.wg.Done()
+		return nil, fmt.Errorf("create activity: %w", err)
+	}
+	r.JobHub.Publish(events.JobEvent{Type: events.JobStarted, Job: job, Activity: act})
+
+	go r.execute(cfg, act)
+	out := act
+	return &out, nil
+}
+
+type execLog interface {
+	io.Writer
+	Logf(level, format string, args ...any)
+}
+
+type discardLog struct{}
+
+func (discardLog) Write(p []byte) (int, error)  { return len(p), nil }
+func (discardLog) Logf(string, string, ...any) {}
+
+func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
+	defer r.wg.Done()
+	defer r.jobs.Release(cfg.Name) // safety net; idempotent
+	ctx := r.ctx
+
+	var lg execLog = discardLog{}
+	closeLog := func() {}
+	if w, err := logstore.Open(act.LogPath, act.ID, r.LogHub); err != nil {
+		r.Logger.Error("open execution log", "backup", cfg.Name, "path", act.LogPath, "err", err)
+	} else {
+		lg, closeLog = w, func() { _ = w.Close() }
+	}
+	defer closeLog()
+
+	lg.Logf("INFO", "execution %s started (backup=%s database=%s trigger=%s)", act.ID, cfg.Name, cfg.Database, act.TriggeredBy)
+	runErr := r.runPhases(ctx, cfg, act, lg)
+
+	finished := r.Clock().UTC()
+	act.FinishedAt = &finished
+	act.Status = domain.StatusSuccess
+	if runErr != nil {
+		act.Status = domain.StatusError
+		act.Error = runErr.Error()
+		if ctx.Err() != nil {
+			act.Error = "interrupted: " + act.Error
+		}
+	}
+	if runErr != nil {
+		lg.Logf("ERROR", "execution finished: status=error err=%s", act.Error)
+	} else {
+		lg.Logf("INFO", "execution finished: status=success elapsed=%s", finished.Sub(act.StartedAt).Round(time.Millisecond))
+	}
+	closeLog() // flush before the notifier reads the tail
+
+	// Record the result even during shutdown.
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := r.Activities.Finish(fctx, act.ID, act.Status, finished, act.Error); err != nil {
+		r.Logger.Error("finish activity", "activity", act.ID, "err", err)
+	}
+	job, _ := r.jobs.SetPhase(cfg.Name, domain.PhaseCleanup)
+	r.jobs.Release(cfg.Name)
+	r.JobHub.Publish(events.JobEvent{Type: events.JobFinished, Job: job, Activity: act})
+
+	if runErr != nil {
+		nctx, ncancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer ncancel()
+		err := r.Notifier.NotifyFailure(nctx, domain.NotifyEvent{
+			Backup: cfg, Activity: act, LogTail: notify.TailLog(act.LogPath, 15, 2000),
+		})
+		if err != nil {
+			r.Logger.Warn("notify failure", "backup", cfg.Name, "err", err)
+		}
+	}
+}
+
+func (r *Runner) setPhase(cfg domain.BackupConfig, act domain.Activity, p domain.Phase) {
+	if job, ok := r.jobs.SetPhase(cfg.Name, p); ok {
+		r.JobHub.Publish(events.JobEvent{Type: events.JobPhase, Job: job, Activity: act})
+	}
+}
+
+func (r *Runner) runPhases(ctx context.Context, cfg domain.BackupConfig, act domain.Activity, lg execLog) (err error) {
+	tmpDir := filepath.Join(r.Global.TempPath, "pgkeeper", cfg.Name)
+
+	// Deferred LIFO: cleanup runs first, then panic recovery.
+	defer func() {
+		if p := recover(); p != nil {
+			r.Logger.Error("panic in execution", "backup", cfg.Name, "panic", p, "stack", string(debug.Stack()))
+			lg.Logf("ERROR", "internal panic: %v", p)
+			err = errors.New("internal panic")
+		}
+	}()
+	defer func() {
+		lg.Logf("INFO", "phase %s: removing %s", domain.PhaseCleanup, tmpDir)
+		if e := os.RemoveAll(tmpDir); e != nil {
+			lg.Logf("WARN", "cleanup failed: %v", e)
+		}
+	}()
+
+	if err := os.RemoveAll(tmpDir); err != nil {
+		return fmt.Errorf("prepare temp dir: %w", err)
+	}
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+		return fmt.Errorf("prepare temp dir: %w", err)
+	}
+
+	dbName := safeName(cfg.Database)
+	files := []string{dbName + ".sql"}
+	if err := r.dump(ctx, cfg, act, lg, domain.PhaseDump, domain.DumpDatabase, filepath.Join(tmpDir, files[0])); err != nil {
+		return err
+	}
+	if cfg.Roles {
+		rolesFile := dbName + "_roles.sql"
+		files = append(files, rolesFile)
+		if err := r.dump(ctx, cfg, act, lg, domain.PhaseRoles, domain.DumpRoles, filepath.Join(tmpDir, rolesFile)); err != nil {
+			return err
+		}
+	}
+	return r.resticPhase(ctx, cfg, act, lg, tmpDir, files)
+}
+
+func (r *Runner) dump(ctx context.Context, cfg domain.BackupConfig, act domain.Activity, lg execLog,
+	phase domain.Phase, kind domain.DumpKind, path string) error {
+
+	r.setPhase(cfg, act, phase)
+	lg.Logf("INFO", "phase %s: start", phase)
+	start := time.Now()
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("%s: %w", phase, err)
+	}
+	spec := domain.DumpSpec{Kind: kind, Container: cfg.Container, Database: cfg.Database,
+		Host: cfg.Host, Username: cfg.Username, Port: cfg.Port}
+	dumpErr := r.Exec.Dump(ctx, spec, f, lg)
+	closeErr := f.Close()
+	if dumpErr != nil {
+		return fmt.Errorf("%s: %w", phase, dumpErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("%s: %w", phase, closeErr)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%s: %w", phase, err)
+	}
+	if fi.Size() == 0 {
+		return fmt.Errorf("%s: output file is empty", phase)
+	}
+	lg.Logf("INFO", "phase %s: done size=%d bytes elapsed=%s", phase, fi.Size(), time.Since(start).Round(time.Millisecond))
+	return nil
+}
+
+func (r *Runner) resticPhase(ctx context.Context, cfg domain.BackupConfig, act domain.Activity, lg execLog,
+	dir string, files []string) error {
+
+	r.setPhase(cfg, act, domain.PhaseRestic)
+	lg.Logf("INFO", "phase %s: start", domain.PhaseRestic)
+	start := time.Now()
+	if err := r.Restic.EnsureRepo(ctx, cfg.Restic, lg); err != nil {
+		return fmt.Errorf("restic: %w", err)
+	}
+	if err := r.Restic.Backup(ctx, cfg.Restic, cfg.ResticTag, cfg.Name, dir, files, lg); err != nil {
+		return fmt.Errorf("restic: %w", err)
+	}
+	if err := r.Restic.Forget(ctx, cfg.Restic, cfg.ResticTag, cfg.Name, lg); err != nil {
+		return fmt.Errorf("restic: %w", err)
+	}
+	lg.Logf("INFO", "phase %s: done elapsed=%s", domain.PhaseRestic, time.Since(start).Round(time.Millisecond))
+	return nil
+}
+
+// Shutdown stops accepting runs and waits for running ones until ctx expires,
+// then cancels them (they finish as "error: interrupted…").
+func (r *Runner) Shutdown(ctx context.Context) error {
+	r.mu.Lock()
+	r.stopping = true
+	r.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() { r.wg.Wait(); close(done) }()
+
+	select {
+	case <-done:
+		r.cancel()
+		return nil
+	case <-ctx.Done():
+		r.cancel()
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+		}
+		return fmt.Errorf("runner shutdown: %w", ctx.Err())
+	}
+}

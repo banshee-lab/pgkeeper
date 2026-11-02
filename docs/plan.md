@@ -193,7 +193,7 @@ Commands run via `exec.CommandContext` with an **argv slice (no shell)**; stdout
 - Secrets: `domain.Secret` type redacts on `String()`/`slog.LogValue`/JSON. Restic password passed via env `RESTIC_PASSWORD`, never argv. Telegram token stripped from HTTP errors.
 - Testing: stdlib `testing`, table tests, fake `Executor`/`Notifier`/`Restic` implementations, in-memory SQLite for store tests, `httptest` for API.
 - Lint/CI: `golangci-lint`, `go vet`, `go test -race ./...`.
-- Dependencies: `chi/v5`, `modernc.org/sqlite`, `robfig/cron/v3`, `pelletier/go-toml/v2`, `google/uuid`, `pressly/goose/v3`, `coreos/go-oidc/v3`, `golang.org/x/oauth2`.
+- Dependencies: `chi/v5`, `modernc.org/sqlite`, `robfig/cron/v3`, `pelletier/go-toml/v2`, `pressly/goose/v3`, `coreos/go-oidc/v3`, `golang.org/x/oauth2`.
 
 ## 8. Phases
 
