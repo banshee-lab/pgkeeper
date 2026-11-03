@@ -1,0 +1,70 @@
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test_backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run backend tests
+        run: go test ./...
+
+  test_frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: yarn
+          cache-dependency-path: web/yarn.lock
+
+      - name: Set up Yarn
+        run: npm install --global yarn@1.22.22
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Run frontend tests
+        run: yarn test:ci
+
+  build_and_publish:
+    runs-on: ubuntu-latest
+    needs:
+      - test_backend
+      - test_frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Build, Push and Notify
+        uses: banshee-lab/docker-deploy-action@main
+        with:
+          username: dahool
+          password: ${{ secrets.GH_TOKEN }}
+          komodo_address: ${{ vars.KOMODO_URL }}
+          komodo_api_key: ${{ secrets.KOMODO_API_KEY }}
+          komodo_api_secret: ${{ secrets.KOMODO_API_SECRET }}
+          stack_name: ${{ vars.STACK_NAME }}
+          telegram_token: ${{ secrets.TELEGRAM_TOKEN }}
+          telegram_to: ${{ secrets.TELEGRAM_TO }}
+          commit_message: ${{ vars.STACK_NAME }}
