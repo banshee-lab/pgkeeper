@@ -20,6 +20,23 @@ export function relativeShort(value: string | Date | null, now = Date.now()): st
 	return `${prefix}${days}d ${suffix}`.trim();
 }
 
+export function nextRunUpdateDelay(value: string | null, now = Date.now()): number | null {
+	if (!value) return null;
+	const timestamp = Date.parse(value);
+	if (Number.isNaN(timestamp)) return null;
+
+	const remaining = timestamp - now;
+	const distance = Math.abs(remaining);
+	const minute = 60_000;
+	const hour = 60 * minute;
+	const interval = distance < minute ? 1_000 : distance < hour ? minute : hour;
+
+	if (remaining > 0 && remaining <= minute) return 1_000;
+	if (remaining > hour) return Math.max(1_000, Math.min(interval, remaining - hour));
+	if (remaining > minute) return Math.max(1_000, Math.min(interval, remaining - minute));
+	return interval;
+}
+
 export function formatDuration(milliseconds: number | null | undefined): string {
 	if (milliseconds == null || !Number.isFinite(milliseconds)) return '—';
 	const seconds = Math.max(0, Math.floor(milliseconds / 1000));

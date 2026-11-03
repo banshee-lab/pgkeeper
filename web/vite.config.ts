@@ -6,7 +6,10 @@ import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 
 export default defineConfig(({ mode }) => {
-	const backend = loadEnv(mode, '.', '').PGKEEPER_URL ?? 'http://localhost:8080';
+	const backend =
+		mode === 'development'
+			? (loadEnv(mode, '.', '').PGKEEPER_URL ?? 'http://localhost:8080')
+			: undefined;
 	return {
 		plugins: [
 			tailwindcss(),
@@ -19,13 +22,15 @@ export default defineConfig(({ mode }) => {
 				}
 			})
 		],
-		server: {
-			proxy: {
-				'/api': backend,
-				'/auth': backend,
-				'/healthz': backend
-			}
-		},
+		server: backend
+			? {
+					proxy: {
+						'/api': backend,
+						'/auth': backend,
+						'/healthz': backend
+					}
+				}
+			: undefined,
 		optimizeDeps: {
 			exclude: ['@runwisp/ui']
 		},

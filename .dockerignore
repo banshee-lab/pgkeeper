@@ -25,6 +25,8 @@ docker-compose*
 /bin/
 /dist/
 /build/
+web/build/
+web/.svelte-kit/
 *.exe
 *.exe-
 *.dll

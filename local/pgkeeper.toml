@@ -1,0 +1,16 @@
+[global]
+temp_path = "/tmp/pgk/tmp"
+log_path  = "/tmp/pgk/logs"
+db_path   = "/tmp/pgk/pgkeeper.db"
+listen    = ":8080"
+
+[restic]
+repository = "/tmp/pgk/restic"
+password   = "dev-password"
+keep-daily = 7
+
+[backup.main_db]
+cron       = "@every 1m"
+container  = "pg-test"
+database   = "app"
+roles      = true

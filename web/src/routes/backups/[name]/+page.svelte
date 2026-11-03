@@ -11,6 +11,7 @@
 	import type { Activity } from '$lib/api/types';
 	import { activities } from '$lib/stores/activities.svelte';
 	import { backups } from '$lib/stores/backups.svelte';
+	import { logStream } from '$lib/stores/log-stream.svelte';
 
 	const name = $derived(page.params.name ?? '');
 	const backup = $derived(backups.list.find((candidate) => candidate.name === name) ?? null);
@@ -24,6 +25,9 @@
 	let logLoading = $state(false);
 	let logError = $state<string | null>(null);
 	let activeLogRequest = 0;
+	const liveLogText = $derived(
+		selectedActivity && selectedActivity.status === 'running' ? logStream.lines.join('\n') : logText
+	);
 
 	function updateSelection(nextId: string | null) {
 		selectedId = nextId;
@@ -90,9 +94,11 @@
 		if (activity.status === 'running') {
 			logLoading = false;
 			logError = null;
-			logText = 'Live streaming is added in phase 3. Use reload to refresh the last saved log snapshot.';
+			logText = '';
+			await logStream.create(activity.id);
 			return;
 		}
+		logStream.close();
 		const token = ++activeLogRequest;
 		logLoading = true;
 		logError = null;
@@ -113,13 +119,15 @@
 
 	async function handleCopy() {
 		if (!selectedActivity) return;
-		if (!logText) return;
-		await navigator.clipboard.writeText(logText);
+		const textToCopy = selectedActivity.status === 'running' ? liveLogText : logText;
+		if (!textToCopy) return;
+		await navigator.clipboard.writeText(textToCopy);
 	}
 
 	function handleDownload() {
 		if (!selectedActivity) return;
-		const blob = new Blob([logText], { type: 'text/plain;charset=utf-8' });
+		const textToDownload = selectedActivity.status === 'running' ? liveLogText : logText;
+		const blob = new Blob([textToDownload], { type: 'text/plain;charset=utf-8' });
 		const url = URL.createObjectURL(blob);
 		const link = document.createElement('a');
 		link.href = url;
@@ -135,6 +143,7 @@
 
 	$effect(() => {
 		if (!selectedActivity) {
+			logStream.close();
 			logText = '';
 			logLoading = false;
 			logError = null;
@@ -178,7 +187,7 @@
 			<ActivityList items={list} selectedId={selectedId} onSelect={updateSelection} />
 			<OutputPanel
 				activity={selectedActivity}
-				logText={logText}
+				logText={selectedActivity && selectedActivity.status === 'running' ? liveLogText : logText}
 				loading={logLoading}
 				error={logError}
 				onReload={() => selectedActivity && void loadLog(selectedActivity)}

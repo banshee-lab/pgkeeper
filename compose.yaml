@@ -1,0 +1,32 @@
+services:
+  pg-test:
+    image: postgres:17-alpine
+    container_name: pg-test
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_PASSWORD: dev-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  pgkeeper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      pg-test:
+        condition: service_healthy
+    user: 1000:467
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./local/pgkeeper.toml:/etc/pgkeeper/pgkeeper.toml:ro
+      # Required so pgkeeper can run docker exec against pg-test.
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:-998}"
+    tmpfs:
+      - /tmp/pgk:rw,uid=1000,gid=467,mode=0750
+

@@ -2,6 +2,7 @@
 	import { Button, CodeBlock, Heading } from '@runwisp/ui';
 	import type { Activity } from '$lib/api/types';
 	import { formatDateTime, statusLabel, stripAnsi, triggerLabel } from '$lib/format';
+	import { logStream } from '$lib/stores/log-stream.svelte';
 	import StatusBullet from './StatusBullet.svelte';
 
 	let {
@@ -54,17 +55,19 @@
 		</div>
 		{#if activity.status === 'running'}
 			<div class="mb-3 rounded border border-outline bg-surface-sunken px-3 py-2 text-sm text-on-surface-muted">
-				Live streaming is added in phase 3. Use reload to refresh the last saved log snapshot.
+				{logStream.state === 'live' ? 'Live output is streaming.' : logStream.state === 'connecting' ? 'Connecting to live output…' : 'Waiting for stream to start.'}
+				{#if logStream.truncated}
+					<span class="ml-2 text-on-surface-faint">Older lines truncated.</span>
+				{/if}
 			</div>
 		{/if}
-		<div class="overflow-hidden rounded border border-outline bg-surface-sunken">
+		<div class="max-h-[26rem] overflow-auto rounded border border-outline bg-surface-sunken">
 			<CodeBlock
 				code={stripAnsi(logText || 'No output recorded.')}
 				language="text"
 				copyable={true}
 				variant="surface"
 				size="sm"
-				class="max-h-[26rem] overflow-auto"
 			/>
 		</div>
 	{/if}
