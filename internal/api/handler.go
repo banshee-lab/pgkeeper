@@ -33,6 +33,7 @@ type Deps struct {
 	Catalog    domain.BackupCatalog
 	Runner     domain.BackupRunner
 	Scheduler  domain.Scheduler // optional: next_run is null without it
+	Jobs       JobFeed          // optional: defaults to Runner when it implements JobFeed
 	JobHub     *events.Hub[events.JobEvent]
 	LogHub     *events.Hub[logstore.LogLine]
 	Auth       *auth.Service // nil when auth is disabled
@@ -59,6 +60,7 @@ func NewHandler(d Deps) *Handler {
 	if d.LogHub == nil {
 		d.LogHub = events.NewHub[logstore.LogLine]()
 	}
+	d.Jobs = resolveJobFeed(d)
 	return &Handler{Deps: d}
 }
 
@@ -77,7 +79,10 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	if h.Auth == nil {
-		writeJSON(w, http.StatusOK, ToMeDTO(false, nil))
+		// Auth disabled: 200 {auth_enabled:false, authenticated:true, user:null}.
+		m := ToMeDTO(false, nil)
+		m.Authenticated = true
+		writeJSON(w, http.StatusOK, m)
 		return
 	}
 	writeJSON(w, http.StatusOK, ToMeDTO(true, auth.SessionFrom(r.Context())))
@@ -106,10 +111,6 @@ func (h *Handler) backupViews(ctx context.Context, bs []domain.BackupConfig) ([]
 	if err != nil {
 		return nil, err
 	}
-	running := map[string]bool{}
-	for _, j := range h.Runner.Running() {
-		running[j.BackupName] = true
-	}
 	out := make([]BackupDTO, 0, len(bs))
 	for _, b := range bs {
 		var next *time.Time
@@ -122,7 +123,10 @@ func (h *Handler) backupViews(ctx context.Context, bs []domain.BackupConfig) ([]
 		if a, ok := last[b.Name]; ok {
 			la = &a
 		}
-		out = append(out, ToBackupDTO(b, running[b.Name], next, la))
+		// running and last_activity come from the same persisted snapshot
+		// (one SQLite query), never from a separate in-memory read.
+		running := la != nil && la.Status == domain.StatusRunning
+		out = append(out, ToBackupDTO(b, running, next, la))
 	}
 	return out, nil
 }
@@ -249,6 +253,13 @@ func (h *Handler) GetActivityLog(w http.ResponseWriter, r *http.Request) {
 	// The path comes only from the DB row, never from user input.
 	f, err := os.Open(a.LogPath)
 	if errors.Is(err, os.ErrNotExist) {
+		if a.Status == domain.StatusRunning {
+			// The runner creates the file just after the run starts: an empty
+			// log is the correct content for that window.
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		writeError(w, http.StatusNotFound, CodeLogNotFound, "log file not found")
 		return
 	}

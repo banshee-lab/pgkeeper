@@ -220,7 +220,8 @@ func errCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 func TestListBackups(t *testing.T) {
 	a := newAPI(t)
 	a.addActivity("alpha", time.Now().Add(-time.Hour).UTC(), domain.StatusSuccess)
-	a.runner.jobs = []domain.Job{{ActivityID: uuid.New(), BackupName: "beta", Phase: domain.PhaseDump}}
+	// running is derived from the persisted last activity, not from Runner.Running().
+	a.addActivity("beta", time.Now().UTC(), domain.StatusRunning)
 
 	rec := a.do("GET", "/api/v1/backups", "", "")
 	if rec.Code != 200 {
@@ -233,7 +234,7 @@ func TestListBackups(t *testing.T) {
 	if items[0].LastActivity == nil || items[0].Running || items[0].NextRun == nil || *items[0].NextRun != "2026-11-03T03:00:00Z" {
 		t.Errorf("alpha = %+v", items[0])
 	}
-	if !items[1].Running || items[1].NextRun != nil || items[1].LastActivity != nil {
+	if !items[1].Running || items[1].NextRun != nil || items[1].LastActivity == nil || items[1].LastActivity.Status != "running" {
 		t.Errorf("beta = %+v", items[1])
 	}
 }

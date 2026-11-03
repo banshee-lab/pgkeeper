@@ -34,6 +34,11 @@ type Deps struct {
 	Logger     *slog.Logger
 	Clock      func() time.Time // default time.Now
 	NewID      func() uuid.UUID // default uuid.NewV7
+
+	// Final-result persistence policy: FinishAttempts tries (default 3) with
+	// FinishBackoff between them (default 500ms).
+	FinishAttempts int
+	FinishBackoff  time.Duration
 }
 
 type Runner struct {
@@ -61,11 +66,26 @@ func NewRunner(d Deps) *Runner {
 			return id
 		}
 	}
+	if d.JobHub == nil {
+		d.JobHub = events.NewHub[events.JobEvent]()
+	}
+	if d.FinishAttempts <= 0 {
+		d.FinishAttempts = 3
+	}
+	if d.FinishBackoff <= 0 {
+		d.FinishBackoff = 500 * time.Millisecond
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Runner{Deps: d, jobs: NewJobTracker(), ctx: ctx, cancel: cancel}
+	return &Runner{Deps: d, jobs: NewJobTracker(d.JobHub), ctx: ctx, cancel: cancel}
 }
 
 func (r *Runner) Running() []domain.Job { return r.jobs.List() }
+
+// SubscribeJobs returns the running jobs and the events after them with no
+// gap or overlap (see JobTracker.Subscribe).
+func (r *Runner) SubscribeJobs() (events.JobSnapshot, <-chan events.JobEvent, func()) {
+	return r.jobs.Subscribe()
+}
 
 var unsafeRe = regexp.MustCompile(`[^A-Za-z0-9_.-]`)
 
@@ -106,7 +126,7 @@ func (r *Runner) Run(ctx context.Context, name string, by domain.Trigger) (*doma
 		return nil, domain.ErrBackupRunning
 	}
 	if err := r.Activities.Create(ctx, &act); err != nil {
-		r.jobs.Release(name)
+		r.jobs.Release(name, id)
 		r.wg.Done()
 		return nil, fmt.Errorf("create activity: %w", err)
 	}
@@ -116,7 +136,8 @@ func (r *Runner) Run(ctx context.Context, name string, by domain.Trigger) (*doma
 		"database", cfg.Database,
 		"trigger", by,
 		"log_path", act.LogPath)
-	r.JobHub.Publish(events.JobEvent{Type: events.JobStarted, Job: job, Activity: act})
+	// The row is persisted: now make the job visible and publish job.started.
+	r.jobs.Announce(name, act)
 
 	go r.execute(cfg, act)
 	out := act
@@ -135,7 +156,7 @@ func (discardLog) Logf(string, string, ...any) {}
 
 func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
 	defer r.wg.Done()
-	defer r.jobs.Release(cfg.Name) // safety net; idempotent
+	defer r.jobs.Release(cfg.Name, act.ID) // safety net; idempotent, never touches a newer run
 	ctx := r.ctx
 
 	var lg execLog = discardLog{}
@@ -186,18 +207,11 @@ func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
 	}
 	closeLog() // flush before the notifier reads the tail
 
-	// Record the result even during shutdown.
-	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	if err := r.Activities.Finish(fctx, act.ID, act.Status, finished, act.Error); err != nil {
-		r.Logger.Error("persist backup result",
-			"activity", act.ID,
-			"backup", cfg.Name,
-			"err", err)
-	}
-	job, _ := r.jobs.SetPhase(cfg.Name, domain.PhaseCleanup)
-	r.jobs.Release(cfg.Name)
-	r.JobHub.Publish(events.JobEvent{Type: events.JobFinished, Job: job, Activity: act})
+	// Persist first, publish second. If persistence keeps failing, no
+	// success-shaped job.finished is published: subscribers get an
+	// "abandoned" event and close without a final status.
+	persisted := r.persistFinal(ctx, cfg, act)
+	r.jobs.Finish(cfg.Name, act, persisted)
 
 	if runErr != nil {
 		nctx, ncancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -211,10 +225,40 @@ func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
 	}
 }
 
-func (r *Runner) setPhase(cfg domain.BackupConfig, act domain.Activity, p domain.Phase) {
-	if job, ok := r.jobs.SetPhase(cfg.Name, p); ok {
-		r.JobHub.Publish(events.JobEvent{Type: events.JobPhase, Job: job, Activity: act})
+// persistFinal stores the final activity row with a bounded retry, even
+// during shutdown. It reports whether the row was stored.
+func (r *Runner) persistFinal(ctx context.Context, cfg domain.BackupConfig, act domain.Activity) bool {
+	base := context.WithoutCancel(ctx)
+	var err error
+	for attempt := 1; attempt <= r.FinishAttempts; attempt++ {
+		fctx, cancel := context.WithTimeout(base, 10*time.Second)
+		err = r.Activities.Finish(fctx, act.ID, act.Status, *act.FinishedAt, act.Error)
+		cancel()
+		if err == nil {
+			return true
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			break // retrying cannot help
+		}
+		r.Logger.Warn("persist backup result failed",
+			"activity", act.ID,
+			"backup", cfg.Name,
+			"attempt", attempt,
+			"err", err)
+		if attempt < r.FinishAttempts {
+			time.Sleep(r.FinishBackoff)
+		}
 	}
+	r.Logger.Error("persist backup result failed; final status not recorded (row stays 'running' until restart)",
+		"activity", act.ID,
+		"backup", cfg.Name,
+		"status", act.Status,
+		"err", err)
+	return false
+}
+
+func (r *Runner) setPhase(cfg domain.BackupConfig, act domain.Activity, p domain.Phase) {
+	r.jobs.SetPhase(cfg.Name, act, p)
 }
 
 func (r *Runner) runPhases(ctx context.Context, cfg domain.BackupConfig, act domain.Activity, lg execLog) (err error) {
