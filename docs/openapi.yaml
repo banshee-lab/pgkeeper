@@ -1,10 +1,13 @@
 openapi: 3.0.3
 info:
   title: pgkeeper API
-  version: 1.0.0
+  version: 1.1.0
   description: >
-    Scheduler and API for PostgreSQL backups (pg_dump via docker exec -> restic).
+    Scheduler and API for PostgreSQL backups (pg_dump via docker exec → restic).
     When OIDC is configured, /api/v1 routes require the pgkeeper_session cookie.
+
+    POST /auth/logout and POST /api/v1/backups/{name}/run require a matching
+    Origin or Referer header (same-origin check).
 servers:
   - url: /
 tags:
@@ -64,13 +67,21 @@ paths:
     post:
       tags: [auth]
       summary: Destroy the session
+      description: >
+        Requires a same-origin Origin or Referer header. Returns 403 if the
+        header is absent or cross-origin.
       responses:
         '204': { description: Logged out }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/v1/me:
     get:
       tags: [auth]
       summary: Current user / auth status
+      description: >
+        When auth is disabled, returns `{"auth_enabled":false,"authenticated":true,"user":null}`.
+        When auth is enabled and the session is valid, returns the user's profile.
+        When auth is enabled and there is no valid session, returns 401.
       responses:
         '200':
           description: OK
@@ -117,11 +128,14 @@ paths:
       - $ref: '#/components/parameters/BackupName'
     get:
       tags: [backups, activities]
-      summary: Last activities of one backup (max 10)
+      summary: Activities for one backup (paginated)
       parameters:
-        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/SinceFilter'
+        - $ref: '#/components/parameters/CursorParam'
       responses:
-        '200': { $ref: '#/components/responses/ActivityList' }
+        '200': { $ref: '#/components/responses/PagedActivityList' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -132,6 +146,9 @@ paths:
     post:
       tags: [backups]
       summary: Fire a backup manually
+      description: >
+        Requires a same-origin Origin or Referer header. Returns 403 if the
+        header is absent or cross-origin.
       responses:
         '202':
           description: Accepted; execution started
@@ -140,6 +157,7 @@ paths:
               schema: { $ref: '#/components/schemas/Activity' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: Backup already running
@@ -155,11 +173,14 @@ paths:
   /api/v1/activities:
     get:
       tags: [activities]
-      summary: Last activities across all backups (max 10)
+      summary: Recent activities across all backups (paginated)
       parameters:
-        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/PageLimit'
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/SinceFilter'
+        - $ref: '#/components/parameters/CursorParam'
       responses:
-        '200': { $ref: '#/components/responses/ActivityList' }
+        '200': { $ref: '#/components/responses/PagedActivityList' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
 
@@ -185,9 +206,23 @@ paths:
     get:
       tags: [activities]
       summary: Full execution log (content so far if still running)
+      description: >
+        Returns the log as text/plain. If the activity is running and the log
+        file has not been created yet, returns 200 with an empty body.
+        Pass `download=1` to receive the file as a download with a sanitized
+        Content-Disposition filename.
+      parameters:
+        - name: download
+          in: query
+          description: Set to 1 to trigger a file download
+          schema: { type: integer, enum: [1] }
       responses:
         '200':
           description: Log text
+          headers:
+            Content-Disposition:
+              description: Present only when download=1; value is `attachment; filename="…"`
+              schema: { type: string }
           content:
             text/plain:
               schema: { type: string }
@@ -206,8 +241,11 @@ paths:
       tags: [activities]
       summary: SSE stream of the execution log
       description: >
+        The stream starts with `retry: 3000` followed by replayed log lines,
+        then follows live; closes after the `end` event.
+        When auth is enabled and the session expires while the stream is open,
+        the server closes the stream without an `end` event.
         Events: `log` (data: LogLine, id: line number) and `end` (data: LogEnd).
-        Replays existing lines, then follows live; closes after `end`.
       responses:
         '200':
           description: Event stream
@@ -241,8 +279,11 @@ paths:
       tags: [jobs]
       summary: SSE stream of job state changes
       description: >
-        Events: `snapshot` (JobList, once on connect), `job.started` (Job),
+        The stream starts with `retry: 3000` followed by a `snapshot` event
+        (current job list). Subsequent events: `job.started` (Job),
         `job.phase` (Job), `job.finished` (JobFinished).
+        When auth is enabled and the session expires while the stream is open,
+        the server closes the stream without further events.
       responses:
         '200':
           description: Event stream
@@ -269,13 +310,44 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
-    Limit:
+    PageLimit:
       name: limit
       in: query
-      description: Max items (1-10, clamped to 10)
-      schema: { type: integer, minimum: 1, maximum: 10, default: 10 }
+      description: Max items per page (1–100, default 10)
+      schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+    StatusFilter:
+      name: status
+      in: query
+      description: Filter by activity status
+      schema: { $ref: '#/components/schemas/ActivityStatus' }
+    SinceFilter:
+      name: since
+      in: query
+      description: RFC3339 lower bound on started_at (inclusive)
+      schema: { type: string, format: date-time }
+    CursorParam:
+      name: cursor
+      in: query
+      description: Opaque pagination cursor from the previous page's `next` field
+      schema: { type: string }
 
   responses:
+    PagedActivityList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            properties:
+              items:
+                type: array
+                items: { $ref: '#/components/schemas/Activity' }
+              next:
+                type: string
+                description: >
+                  Opaque cursor to pass as `cursor` for the next page.
+                  Absent when there are no further pages.
     ActivityList:
       description: OK
       content:
@@ -295,6 +367,11 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     Unauthenticated:
       description: Missing or expired session
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Request origin not allowed (same-origin check failed)
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -358,10 +435,13 @@ components:
 
     Backup:
       type: object
-      required: [name, cron, container, database, username, host, port, roles, restic, running, next_run, last_activity]
+      required: [name, cron, timezone, container, database, username, host, port, roles, restic, running, next_run, last_success_at, last_activity]
       properties:
         name: { type: string }
         cron: { type: string }
+        timezone:
+          type: string
+          description: IANA timezone name used by the scheduler (e.g. "America/New_York" or "Local")
         container: { type: string }
         database: { type: string }
         username: { type: string }
@@ -371,6 +451,11 @@ components:
         restic: { $ref: '#/components/schemas/ResticView' }
         running: { type: boolean }
         next_run: { type: string, format: date-time, nullable: true }
+        last_success_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: RFC3339 time of the most recent successful activity, or null if never succeeded.
         last_activity:
           nullable: true
           allOf:

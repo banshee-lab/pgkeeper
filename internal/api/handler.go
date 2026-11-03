@@ -40,6 +40,9 @@ type Deps struct {
 	AppCtx     context.Context
 	Heartbeat  time.Duration // SSE ping interval, default 15s
 	Logger     *slog.Logger
+	// Timezone is the effective IANA timezone name used by the scheduler.
+	// Empty string means local time (reported as "Local" in the API).
+	Timezone string
 }
 
 type Handler struct{ Deps }
@@ -102,6 +105,14 @@ func parseLimit(r *http.Request) (int, bool) {
 	return min(n, maxLimit), true
 }
 
+// effectiveTZ returns the timezone name to include in BackupDTO responses.
+func (h *Handler) effectiveTZ() string {
+	if h.Timezone != "" {
+		return h.Timezone
+	}
+	return "Local"
+}
+
 func (h *Handler) backupViews(ctx context.Context, bs []domain.BackupConfig) ([]BackupDTO, error) {
 	names := make([]string, len(bs))
 	for i, b := range bs {
@@ -111,6 +122,11 @@ func (h *Handler) backupViews(ctx context.Context, bs []domain.BackupConfig) ([]
 	if err != nil {
 		return nil, err
 	}
+	success, err := h.Activities.LastSuccessByBackup(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+	tz := h.effectiveTZ()
 	out := make([]BackupDTO, 0, len(bs))
 	for _, b := range bs {
 		var next *time.Time
@@ -126,7 +142,8 @@ func (h *Handler) backupViews(ctx context.Context, bs []domain.BackupConfig) ([]
 		// running and last_activity come from the same persisted snapshot
 		// (one SQLite query), never from a separate in-memory read.
 		running := la != nil && la.Status == domain.StatusRunning
-		out = append(out, ToBackupDTO(b, running, next, la))
+		lsAt, hasSuccess := success[b.Name]
+		out = append(out, ToBackupDTO(b, running, next, la, lsAt, hasSuccess, tz))
 	}
 	return out, nil
 }
@@ -163,17 +180,28 @@ func (h *Handler) ListBackupActivities(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, CodeBackupNotFound, "backup '"+name+"' does not exist")
 		return
 	}
-	limit, ok := parseLimit(r)
+	lim, ok := parsePageLimit(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "limit must be an integer >= 1")
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "limit must be an integer between 1 and 100")
 		return
 	}
-	items, err := h.Activities.ListByBackup(r.Context(), name, limit)
+	filt, ok := parseActivityFilter(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid filter parameter")
+		return
+	}
+	filt.BackupName = name
+	filt.Limit = lim
+	items, next, err := h.Activities.ListFiltered(r.Context(), filt)
 	if err != nil {
 		h.internalError(w, r, "list backup activities", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, ListDTO[ActivityDTO]{Items: ToActivityDTOs(items)})
+	resp := PagedListDTO[ActivityDTO]{Items: ToActivityDTOs(items)}
+	if next != "" {
+		resp.Next = &next
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) RunBackup(w http.ResponseWriter, r *http.Request) {
@@ -205,17 +233,27 @@ func (h *Handler) RunBackup(w http.ResponseWriter, r *http.Request) {
 // ---- activities ----
 
 func (h *Handler) ListActivities(w http.ResponseWriter, r *http.Request) {
-	limit, ok := parseLimit(r)
+	lim, ok := parsePageLimit(r)
 	if !ok {
-		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "limit must be an integer >= 1")
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "limit must be an integer between 1 and 100")
 		return
 	}
-	items, err := h.Activities.ListRecent(r.Context(), limit)
+	filt, ok := parseActivityFilter(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid filter parameter")
+		return
+	}
+	filt.Limit = lim
+	items, next, err := h.Activities.ListFiltered(r.Context(), filt)
 	if err != nil {
 		h.internalError(w, r, "list activities", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, ListDTO[ActivityDTO]{Items: ToActivityDTOs(items)})
+	resp := PagedListDTO[ActivityDTO]{Items: ToActivityDTOs(items)}
+	if next != "" {
+		resp.Next = &next
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // loadActivity parses {id} and loads the row, writing 400/404/500 itself.
@@ -274,6 +312,11 @@ func (h *Handler) GetActivityLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// R-9: download=1 triggers attachment download with a sanitized filename.
+	if r.URL.Query().Get("download") == "1" {
+		fn := safeFilename(a.BackupName, fmtTime(a.StartedAt))
+		w.Header().Set("Content-Disposition", `attachment; filename="`+fn+`"`)
+	}
 	w.WriteHeader(http.StatusOK)
 	// Snapshot: never read past the size at open time (file may still grow).
 	_, _ = io.Copy(w, io.LimitReader(f, fi.Size()))

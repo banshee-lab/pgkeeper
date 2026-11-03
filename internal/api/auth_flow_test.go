@@ -29,6 +29,9 @@ func TestAuthFlowThroughRouter(t *testing.T) {
 
 	do := func(method, target string, c *http.Cookie) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, target, nil)
+		if method == http.MethodPost {
+			req.Header.Set("Origin", "http://"+req.Host)
+		}
 		if c != nil {
 			req.AddCookie(c)
 		}

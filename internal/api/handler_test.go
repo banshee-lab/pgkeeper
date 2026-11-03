@@ -91,6 +91,36 @@ func (f *fakeActs) LastByBackup(_ context.Context, names []string) (map[string]d
 	}
 	return out, nil
 }
+func (f *fakeActs) LastSuccessByBackup(_ context.Context, names []string) (map[string]time.Time, error) {
+	out := map[string]time.Time{}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, n := range names {
+		for _, a := range f.items {
+			if a.BackupName == n && a.Status == domain.StatusSuccess && a.FinishedAt != nil {
+				if t, ok := out[n]; !ok || a.FinishedAt.After(t) {
+					out[n] = *a.FinishedAt
+				}
+			}
+		}
+	}
+	return out, nil
+}
+func (f *fakeActs) ListFiltered(_ context.Context, filt domain.ActivityFilter) ([]domain.Activity, string, error) {
+	keep := func(a domain.Activity) bool {
+		if filt.BackupName != "" && a.BackupName != filt.BackupName {
+			return false
+		}
+		if filt.Status != "" && a.Status != filt.Status {
+			return false
+		}
+		if !filt.Since.IsZero() && a.StartedAt.Before(filt.Since) {
+			return false
+		}
+		return true
+	}
+	return f.sorted(keep, filt.Limit), "", nil
+}
 func (f *fakeActs) MarkRunningAsInterrupted(context.Context, time.Time) (int, error) { return 0, nil }
 
 type fakeRunner struct {
@@ -179,6 +209,11 @@ func (a *testAPI) do(method, target, ctype, body string) *httptest.ResponseRecor
 	if ctype != "" {
 		req.Header.Set("Content-Type", ctype)
 	}
+	// Supply a matching Origin so requireSameOrigin does not reject test POST requests.
+	if method == http.MethodPost {
+		req.Host = "example.com"
+		req.Header.Set("Origin", "http://example.com")
+	}
 	rec := httptest.NewRecorder()
 	a.router.ServeHTTP(rec, req)
 	return rec
@@ -234,8 +269,14 @@ func TestListBackups(t *testing.T) {
 	if items[0].LastActivity == nil || items[0].Running || items[0].NextRun == nil || *items[0].NextRun != "2026-11-03T03:00:00Z" {
 		t.Errorf("alpha = %+v", items[0])
 	}
+	if items[0].LastSuccessAt == nil {
+		t.Errorf("alpha must have last_success_at set")
+	}
 	if !items[1].Running || items[1].NextRun != nil || items[1].LastActivity == nil || items[1].LastActivity.Status != "running" {
 		t.Errorf("beta = %+v", items[1])
+	}
+	if items[0].Timezone == "" {
+		t.Errorf("alpha must have timezone set")
 	}
 }
 
@@ -251,7 +292,7 @@ func TestBackupNotFound(t *testing.T) {
 func TestLimitClamping(t *testing.T) {
 	a := newAPI(t)
 	base := time.Now().UTC()
-	for i := range 12 {
+	for i := range 105 {
 		a.addActivity("alpha", base.Add(time.Duration(i)*time.Minute), domain.StatusSuccess)
 	}
 	for _, p := range []string{"/api/v1/backups/alpha/activities", "/api/v1/activities"} {
@@ -259,7 +300,7 @@ func TestLimitClamping(t *testing.T) {
 			q    string
 			want int // 0 = expect 400
 		}{
-			{"", 10}, {"?limit=3", 3}, {"?limit=11", 10}, {"?limit=10", 10},
+			{"", 10}, {"?limit=3", 3}, {"?limit=101", 100}, {"?limit=100", 100},
 			{"?limit=0", 0}, {"?limit=-1", 0}, {"?limit=abc", 0},
 		} {
 			rec := a.do("GET", p+tc.q, "", "")
@@ -269,7 +310,7 @@ func TestLimitClamping(t *testing.T) {
 				}
 				continue
 			}
-			items := decode[ListDTO[ActivityDTO]](t, rec).Items
+			items := decode[PagedListDTO[ActivityDTO]](t, rec).Items
 			if rec.Code != 200 || len(items) != tc.want {
 				t.Errorf("%s%s = %d, %d items, want %d", p, tc.q, rec.Code, len(items), tc.want)
 			}
@@ -338,6 +379,12 @@ func TestActivityAndLog(t *testing.T) {
 	rec = a.do("GET", logURL, "", "")
 	if rec.Code != 200 || rec.Header().Get("Content-Type") != "text/plain; charset=utf-8" || rec.Body.String() != "l1\nl2\n" {
 		t.Errorf("log = %d %q %q", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
+	}
+
+	// R-9: download=1
+	rec = a.do("GET", logURL+"?download=1", "", "")
+	if rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Disposition"), "attachment") {
+		t.Errorf("download = %d %q", rec.Code, rec.Header().Get("Content-Disposition"))
 	}
 }
 
