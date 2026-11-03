@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { Heading } from '@runwisp/ui';
 	import type { Backup } from '$lib/api/types';
-	import { cronText, formatDateTime, redactUrl, relativeShort } from '$lib/format';
+	import { cronText, redactUrl } from '$lib/format';
 	import { backups } from '$lib/stores/backups.svelte';
+	import NextRun from './NextRun.svelte';
 	import StatusBullet from './StatusBullet.svelte';
 
 	let { backup }: { backup: Backup } = $props();
@@ -64,9 +65,7 @@
 				</div>
 				<div>
 					<dt class="text-xs text-on-surface-muted">Next run</dt>
-					<dd class="text-sm text-on-surface" title={backup.next_run ? formatDateTime(backup.next_run) : undefined}>
-						{backup.next_run ? `${relativeShort(backup.next_run)} · ${formatDateTime(backup.next_run)}` : '—'}
-					</dd>
+					<NextRun value={backup.next_run} />
 				</div>
 				<div>
 					<dt class="text-xs text-on-surface-muted">Roles dump</dt>

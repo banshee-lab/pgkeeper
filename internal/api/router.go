@@ -1,13 +1,18 @@
 package api
 
 import (
+	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
+
+	"github.com/banshee-lab/pgkeeper/web"
 )
 
 func requestLogger(log *slog.Logger) func(http.Handler) http.Handler {
@@ -27,6 +32,12 @@ func requestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 }
 
 func NewRouter(h *Handler) http.Handler {
+	webFS, err := fs.Sub(web.Assets, "build")
+	if err != nil {
+		panic(err)
+	}
+	webFiles := http.FileServer(http.FS(webFS))
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, requestLogger(h.Logger), middleware.Recoverer)
 
@@ -70,8 +81,41 @@ func NewRouter(h *Handler) http.Handler {
 		r.Get("/api/v1/jobs/stream", h.StreamJobs)
 	})
 
-	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotFound, CodeNotFound, "route not found")
+	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/api" || strings.HasPrefix(req.URL.Path, "/api/") ||
+			req.URL.Path == "/auth" || strings.HasPrefix(req.URL.Path, "/auth/") ||
+			req.URL.Path == "/healthz" || strings.HasPrefix(req.URL.Path, "/healthz/") {
+			writeError(w, http.StatusNotFound, CodeNotFound, "route not found")
+			return
+		}
+		if req.Method != http.MethodGet && req.Method != http.MethodHead {
+			writeError(w, http.StatusNotFound, CodeNotFound, "route not found")
+			return
+		}
+
+		name := strings.TrimPrefix(req.URL.Path, "/")
+		if name != "" {
+			if !fs.ValidPath(name) {
+				writeError(w, http.StatusNotFound, CodeNotFound, "route not found")
+				return
+			}
+			_, err := fs.Stat(webFS, name)
+			switch {
+			case err == nil:
+				webFiles.ServeHTTP(w, req)
+				return
+			case !errors.Is(err, fs.ErrNotExist):
+				h.Logger.Error("stat embedded web asset", "path", name, "err", err)
+				writeError(w, http.StatusInternalServerError, CodeInternal, "internal error")
+				return
+			}
+		}
+
+		fallbackReq := req.Clone(req.Context())
+		fallbackURL := *req.URL
+		fallbackURL.Path = "/"
+		fallbackReq.URL = &fallbackURL
+		webFiles.ServeHTTP(w, fallbackReq)
 	})
 	r.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	cronText,
 	formatDuration,
+	nextRunUpdateDelay,
 	redactUrl,
 	relativeShort,
 	statusLabel,
@@ -28,6 +29,26 @@ describe('relativeShort', () => {
 	it('formats future times and missing timestamps', () => {
 		expect(relativeShort(future(180), now)).toBe('in 3m');
 		expect(relativeShort(null, now)).toBe('—');
+	});
+});
+
+describe('nextRunUpdateDelay', () => {
+	const now = Date.parse('2026-01-01T00:00:00Z');
+	const at = (milliseconds: number) => new Date(now + milliseconds).toISOString();
+
+	it('updates at the appropriate cadence and accelerates near a run', () => {
+		expect(nextRunUpdateDelay(at(30_000), now)).toBe(1_000);
+		expect(nextRunUpdateDelay(at(5 * 60_000), now)).toBe(60_000);
+		expect(nextRunUpdateDelay(at(2 * 60 * 60_000), now)).toBe(60 * 60_000);
+		expect(nextRunUpdateDelay(at(60 * 60_000 + 30_000), now)).toBe(30_000);
+		expect(nextRunUpdateDelay(at(60 * 60_000 + 1), now)).toBe(1_000);
+		expect(nextRunUpdateDelay(at(60_000 + 5_000), now)).toBe(5_000);
+		expect(nextRunUpdateDelay(at(60_000), now)).toBe(1_000);
+	});
+
+	it('does not schedule updates for missing or invalid dates', () => {
+		expect(nextRunUpdateDelay(null, now)).toBeNull();
+		expect(nextRunUpdateDelay('invalid', now)).toBeNull();
 	});
 });
 

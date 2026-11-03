@@ -3,13 +3,14 @@ GOLANGCI_LINT ?= golangci-lint
 BINARY ?= bin/pgkeeper
 CONFIG ?= /etc/pgkeeper/pgkeeper.toml
 
-.PHONY: all help build run test race vet lint integration check clean
+.PHONY: all help web-build build run test race vet lint integration check clean
 
 all: build
 
 help:
 	@printf '%s\n' \
 		'Available targets:' \
+		'  web-build    Build the frontend assets' \
 		'  build        Build the pgkeeper binary' \
 		'  run          Run pgkeeper with CONFIG=$(CONFIG)' \
 		'  test         Run all unit tests' \
@@ -20,23 +21,26 @@ help:
 		'  check        Run unit tests and go vet' \
 		'  clean        Remove the built binary'
 
-build:
+web-build:
+	cd web && yarn build
+
+build: web-build
 	mkdir -p "$(dir $(BINARY))"
 	$(GO) build -o "$(BINARY)" ./cmd/pgkeeper
 
-run:
+run: web-build
 	$(GO) run ./cmd/pgkeeper -config "$(CONFIG)"
 
-test:
+test: web-build
 	$(GO) test ./...
 
-race:
+race: web-build
 	$(GO) test -race ./...
 
-vet:
+vet: web-build
 	$(GO) vet ./...
 
-lint:
+lint: web-build
 	$(GOLANGCI_LINT) run ./...
 
 integration:

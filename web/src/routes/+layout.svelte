@@ -6,6 +6,7 @@
 	import { activities } from '$lib/stores/activities.svelte';
 	import { backups } from '$lib/stores/backups.svelte';
 	import { clock } from '$lib/stores/clock.svelte';
+	import { connection } from '$lib/stores/connection.svelte';
 	import { session } from '$lib/stores/session.svelte';
 	import AppShell from '$lib/components/AppShell.svelte';
 	import LoginScreen from '$lib/components/LoginScreen.svelte';
@@ -20,10 +21,14 @@
 
 	async function bootstrap() {
 		await session.load();
-		if (session.status === 'ready') await loadDashboardData();
+		if (session.status === 'ready') {
+			await loadDashboardData();
+			connection.connect();
+		}
 	}
 
 	async function logout() {
+		connection.close();
 		try {
 			await session.logout();
 		} catch (error) {
