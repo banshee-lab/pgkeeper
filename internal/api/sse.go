@@ -12,8 +12,9 @@ type sseWriter struct {
 	rc *http.ResponseController
 }
 
-// newSSE sets the SSE headers, disables the write deadline and flushes the
-// header. It writes a 500 itself and returns false if streaming is unsupported.
+// newSSE sets the SSE headers, disables the write deadline, flushes the
+// header and writes the one-time `retry: 3000` directive. It writes a 500
+// itself and returns false if streaming is unsupported.
 func newSSE(w http.ResponseWriter) (*sseWriter, bool) {
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Time{}) // ErrNotSupported (e.g. recorders) is fine
@@ -28,6 +29,13 @@ func newSSE(w http.ResponseWriter) (*sseWriter, bool) {
 		h.Del("Connection")
 		h.Del("X-Accel-Buffering")
 		writeError(w, http.StatusInternalServerError, CodeInternal, "streaming unsupported")
+		return nil, false
+	}
+	// Headers are already sent; if the client is gone there is nothing to report.
+	if _, err := fmt.Fprint(w, "retry: 3000\n\n"); err != nil {
+		return nil, false
+	}
+	if err := rc.Flush(); err != nil {
 		return nil, false
 	}
 	return &sseWriter{w: w, rc: rc}, true

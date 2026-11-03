@@ -8,28 +8,63 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/banshee-lab/pgkeeper/internal/auth"
 	"github.com/banshee-lab/pgkeeper/internal/domain"
 	"github.com/banshee-lab/pgkeeper/internal/events"
 	"github.com/banshee-lab/pgkeeper/internal/logstore"
 )
+
+// errJobAbandoned ends a jobs stream: the job's final state was never
+// persisted, so the client must reconnect and take a fresh snapshot.
+var errJobAbandoned = errors.New("job abandoned")
+
+// sessionGuard ends streams when the authenticated session expires. With auth
+// disabled there is no session and the guard never fires.
+type sessionGuard struct {
+	exp time.Time
+	has bool
+}
+
+func newSessionGuard(ctx context.Context) sessionGuard {
+	if s := auth.SessionFrom(ctx); s != nil {
+		return sessionGuard{exp: s.ExpiresAt, has: true}
+	}
+	return sessionGuard{}
+}
+
+func (g sessionGuard) valid() bool { return !g.has || time.Now().Before(g.exp) }
+
+// timer returns a channel that fires at expiry (nil, i.e. never, without a
+// session) and a stop function.
+func (g sessionGuard) timer() (<-chan time.Time, func()) {
+	if !g.has {
+		return nil, func() {}
+	}
+	t := time.NewTimer(time.Until(g.exp))
+	return t.C, func() { t.Stop() }
+}
 
 // ---- GET /api/v1/jobs/stream ----
 
 func (h *Handler) StreamJobs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Subscribe first, then snapshot: nothing can fall between the two.
-	// Duplicates are harmless (clients key by activity_id).
-	ch, cancel := h.JobHub.Subscribe(nil)
+	// Snapshot and subscription share one boundary: nothing is lost or
+	// duplicated between them.
+	snap, ch, cancel := h.Jobs.SubscribeJobs()
 	defer cancel()
 
 	sse, ok := newSSE(w)
 	if !ok {
 		return
 	}
-	if err := sse.event("snapshot", "", ListDTO[JobDTO]{Items: ToJobDTOs(h.Runner.Running())}); err != nil {
+	if err := sse.event("snapshot", "", ListDTO[JobDTO]{Items: ToJobDTOs(snap.Jobs)}); err != nil {
 		return
 	}
+
+	guard := newSessionGuard(ctx)
+	expired, stopExpiry := guard.timer()
+	defer stopExpiry()
 
 	tick := time.NewTicker(h.Heartbeat)
 	defer tick.Stop()
@@ -37,12 +72,20 @@ func (h *Handler) StreamJobs(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-expired:
+			return
 		case <-tick.C:
-			if sse.comment("ping") != nil {
+			if !guard.valid() || sse.comment("ping") != nil {
 				return
 			}
 		case ev, ok := <-ch:
 			if !ok {
+				return
+			}
+			if ev.Seq != 0 && ev.Seq <= snap.Seq {
+				continue // already reflected in the snapshot
+			}
+			if !guard.valid() {
 				return
 			}
 			if h.sendJobEvent(ctx, sse, ev) != nil {
@@ -65,6 +108,8 @@ func (h *Handler) sendJobEvent(ctx context.Context, sse *sseWriter, ev events.Jo
 			act = *a
 		}
 		return sse.event("job.finished", "", JobFinishedDTO{Job: ToJobDTO(ev.Job), Activity: ToActivityDTO(act)})
+	case events.JobAbandoned:
+		return errJobAbandoned // no final state to report: close the stream
 	}
 	return nil
 }
@@ -146,8 +191,10 @@ func (h *Handler) StreamActivityLog(w http.ResponseWriter, r *http.Request) {
 		// Subscribe BEFORE reading the file so no line is lost in between.
 		lc, cancelLog := h.LogHub.Subscribe(func(l logstore.LogLine) bool { return l.ActivityID == id })
 		defer cancelLog()
+		// Finished and abandoned both end the stream; "abandoned" yields an
+		// `end` with error "final status unavailable" (the row stayed running).
 		jc, cancelJob := h.JobHub.Subscribe(func(e events.JobEvent) bool {
-			return e.Type == events.JobFinished && e.Activity.ID == id
+			return (e.Type == events.JobFinished || e.Type == events.JobAbandoned) && e.Activity.ID == id
 		})
 		defer cancelJob()
 		logCh, doneCh = lc, jc
@@ -167,14 +214,20 @@ func (h *Handler) StreamActivityLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if act.Status == domain.StatusRunning {
+		guard := newSessionGuard(ctx)
+		expired, stopExpiry := guard.timer()
+		defer stopExpiry()
+
 		tick := time.NewTicker(h.Heartbeat)
 		defer tick.Stop()
 		for finished := false; !finished; {
 			select {
 			case <-ctx.Done():
 				return
+			case <-expired:
+				return
 			case <-tick.C:
-				if sse.comment("ping") != nil {
+				if !guard.valid() || sse.comment("ping") != nil {
 					return
 				}
 				// Safety net if the finished event was dropped.
@@ -185,7 +238,7 @@ func (h *Handler) StreamActivityLog(w http.ResponseWriter, r *http.Request) {
 				if !ok {
 					return
 				}
-				if f.live(l) != nil {
+				if !guard.valid() || f.live(l) != nil {
 					return
 				}
 			case <-doneCh:
