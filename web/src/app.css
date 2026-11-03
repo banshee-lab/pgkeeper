@@ -1,0 +1,85 @@
+@import '@runwisp/ui/theme.css';
+@source '../node_modules/@runwisp/ui';
+
+:root {
+	color-scheme: light;
+	--header-height: 3.5rem;
+	--sidebar-width: 14.5rem;
+}
+
+:root.dark {
+	color-scheme: dark;
+}
+
+html,
+body {
+	min-width: 20rem;
+	min-height: 100%;
+}
+
+body {
+	font-size: 0.8125rem;
+}
+
+.panel {
+	min-width: 0;
+	border-top: 1px solid var(--rw-outline);
+	padding-top: 1rem;
+}
+
+button,
+a,
+input {
+	-webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+	outline: 2px solid var(--rw-primary);
+	outline-offset: 2px;
+}
+
+.shell-header {
+	position: fixed;
+	inset: 0 0 auto;
+	z-index: 40;
+	height: var(--header-height);
+	backdrop-filter: blur(12px);
+}
+
+.shell-sidebar {
+	position: fixed;
+	top: var(--header-height);
+	bottom: 0;
+	left: 0;
+	z-index: 30;
+	width: var(--sidebar-width);
+}
+
+.shell-main {
+	min-height: 100vh;
+	padding-top: var(--header-height);
+}
+
+@media (min-width: 768px) {
+	.shell-main {
+		margin-left: var(--sidebar-width);
+	}
+}
+
+@media (max-width: 767px) {
+	.shell-sidebar {
+		z-index: 50;
+		transform: translateX(-100%);
+		transition: transform 160ms ease-out;
+	}
+
+	.shell-sidebar[data-open='true'] {
+		transform: translateX(0);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.shell-sidebar {
+		transition: none;
+	}
+}
