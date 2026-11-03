@@ -154,6 +154,17 @@ type discardLog struct{}
 func (discardLog) Write(p []byte) (int, error) { return len(p), nil }
 func (discardLog) Logf(string, string, ...any) {}
 
+// redactExecLog routes subprocess stderr (Write) through a RedactWriter so
+// that restic passwords and URL credentials cannot appear in log files.
+// Runner-level messages (Logf) bypass redaction as the runner controls them.
+type redactExecLog struct {
+	base   *logstore.Writer
+	stderr *logstore.RedactWriter
+}
+
+func (l *redactExecLog) Write(p []byte) (int, error)            { return l.stderr.Write(p) }
+func (l *redactExecLog) Logf(level, format string, args ...any) { l.base.Logf(level, format, args...) }
+
 func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
 	defer r.wg.Done()
 	defer r.jobs.Release(cfg.Name, act.ID) // safety net; idempotent, never touches a newer run
@@ -168,7 +179,17 @@ func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
 			"path", act.LogPath,
 			"err", err)
 	} else {
-		lg, closeLog = w, func() { _ = w.Close() }
+		// Wrap the subprocess-stderr path with a line-level redactor so that
+		// pg_dump / docker output cannot leak the restic password or embedded
+		// URL credentials. The runner's own Logf messages bypass this because
+		// they are constructed by code we control.
+		red := logstore.StringRedactor(cfg.Restic.Password.Reveal())
+		rw := logstore.NewRedactWriter(w, red)
+		lg = &redactExecLog{base: w, stderr: rw}
+		closeLog = func() {
+			_ = rw.Close()
+			_ = w.Close()
+		}
 	}
 	defer closeLog()
 

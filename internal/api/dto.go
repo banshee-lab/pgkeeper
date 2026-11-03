@@ -30,18 +30,20 @@ type ResticDTO struct {
 }
 
 type BackupDTO struct {
-	Name         string       `json:"name"`
-	Cron         string       `json:"cron"`
-	Container    string       `json:"container"`
-	Database     string       `json:"database"`
-	Username     string       `json:"username"`
-	Host         string       `json:"host"`
-	Port         int          `json:"port"`
-	Roles        bool         `json:"roles"`
-	Restic       ResticDTO    `json:"restic"`
-	Running      bool         `json:"running"`
-	NextRun      *string      `json:"next_run"`
-	LastActivity *ActivityDTO `json:"last_activity"`
+	Name          string       `json:"name"`
+	Cron          string       `json:"cron"`
+	Timezone      string       `json:"timezone"`
+	Container     string       `json:"container"`
+	Database      string       `json:"database"`
+	Username      string       `json:"username"`
+	Host          string       `json:"host"`
+	Port          int          `json:"port"`
+	Roles         bool         `json:"roles"`
+	Restic        ResticDTO    `json:"restic"`
+	Running       bool         `json:"running"`
+	NextRun       *string      `json:"next_run"`
+	LastSuccessAt *string      `json:"last_success_at"`
+	LastActivity  *ActivityDTO `json:"last_activity"`
 }
 
 type JobDTO struct {
@@ -84,6 +86,12 @@ type ListDTO[T any] struct {
 	Items []T `json:"items"`
 }
 
+// PagedListDTO is used by the paginated activity list (R-8).
+type PagedListDTO[T any] struct {
+	Items  []T     `json:"items"`
+	Next   *string `json:"next,omitempty"` // opaque cursor; absent when no more pages
+}
+
 func fmtTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
 func timePtr(t *time.Time) *string {
@@ -91,6 +99,14 @@ func timePtr(t *time.Time) *string {
 		return nil
 	}
 	s := fmtTime(*t)
+	return &s
+}
+
+func timePtrVal(t time.Time, ok bool) *string {
+	if !ok {
+		return nil
+	}
+	s := fmtTime(t)
 	return &s
 }
 
@@ -130,10 +146,12 @@ var credsRe = regexp.MustCompile(`(://)[^/@\s]+@`)
 func redactRepo(s string) string { return credsRe.ReplaceAllString(s, "${1}***@") }
 
 // ToBackupDTO: next is the scheduler's next run (nil if unknown), last the
-// latest activity (nil if none).
-func ToBackupDTO(b domain.BackupConfig, running bool, next *time.Time, last *domain.Activity) BackupDTO {
+// latest activity (nil if none), lastSuccessAt the last successful run time
+// (zero, false if never), tz the effective IANA timezone name.
+func ToBackupDTO(b domain.BackupConfig, running bool, next *time.Time, last *domain.Activity, lastSuccessAt time.Time, hasSuccess bool, tz string) BackupDTO {
 	d := BackupDTO{
-		Name: b.Name, Cron: b.Cron, Container: b.Container, Database: b.Database,
+		Name: b.Name, Cron: b.Cron, Timezone: tz,
+		Container: b.Container, Database: b.Database,
 		Username: b.Username, Host: b.Host, Port: b.Port, Roles: b.Roles,
 		Restic: ResticDTO{
 			Repository:  redactRepo(b.Restic.Repository),
@@ -143,8 +161,9 @@ func ToBackupDTO(b domain.BackupConfig, running bool, next *time.Time, last *dom
 			KeepMonthly: b.Restic.KeepMonthly,
 			KeepYearly:  b.Restic.KeepYearly,
 		},
-		Running: running,
-		NextRun: timePtr(next),
+		Running:       running,
+		NextRun:       timePtr(next),
+		LastSuccessAt: timePtrVal(lastSuccessAt, hasSuccess),
 	}
 	if last != nil {
 		a := ToActivityDTO(*last)

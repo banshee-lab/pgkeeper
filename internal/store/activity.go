@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -140,6 +142,123 @@ func (s *ActivityStore) LastByBackup(ctx context.Context, names []string) (map[s
 		res[a.BackupName] = a
 	}
 	return res, nil
+}
+
+func (s *ActivityStore) LastSuccessByBackup(ctx context.Context, names []string) (map[string]time.Time, error) {
+	res := map[string]time.Time{}
+	if len(names) == 0 {
+		return res, nil
+	}
+	args := make([]any, len(names))
+	for i, n := range names {
+		args[i] = n
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT backup_name, MAX(finished_at) FROM activities
+		 WHERE backup_name IN (`+ph+`) AND status='success' AND finished_at IS NOT NULL
+		 GROUP BY backup_name`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, ts string
+		if err := rows.Scan(&name, &ts); err != nil {
+			return nil, err
+		}
+		t, err := parseTime(ts)
+		if err != nil {
+			return nil, err
+		}
+		res[name] = t
+	}
+	return res, rows.Err()
+}
+
+// encodeCursor produces an opaque string from (started_at, id).
+func encodeCursor(t time.Time, id uuid.UUID) string {
+	raw := fmtTime(t) + "|" + id.String()
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// decodeCursor parses a cursor returned by encodeCursor.
+func decodeCursor(s string) (time.Time, uuid.UUID, error) {
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return time.Time{}, uuid.UUID{}, fmt.Errorf("invalid cursor")
+	}
+	parts := strings.SplitN(string(b), "|", 2)
+	if len(parts) != 2 {
+		return time.Time{}, uuid.UUID{}, fmt.Errorf("invalid cursor")
+	}
+	t, err := parseTime(parts[0])
+	if err != nil {
+		return time.Time{}, uuid.UUID{}, fmt.Errorf("invalid cursor")
+	}
+	id, err := uuid.Parse(parts[1])
+	if err != nil {
+		return time.Time{}, uuid.UUID{}, fmt.Errorf("invalid cursor")
+	}
+	return t, id, nil
+}
+
+func (s *ActivityStore) ListFiltered(ctx context.Context, f domain.ActivityFilter) ([]domain.Activity, string, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	var (
+		conds []string
+		args  []any
+	)
+
+	if f.BackupName != "" {
+		conds = append(conds, "backup_name=?")
+		args = append(args, f.BackupName)
+	}
+	if f.Status != "" {
+		conds = append(conds, "status=?")
+		args = append(args, string(f.Status))
+	}
+	if !f.Since.IsZero() {
+		conds = append(conds, "started_at>=?")
+		args = append(args, fmtTime(f.Since))
+	}
+	if f.Cursor != "" {
+		cursorTS, cursorID, err := decodeCursor(f.Cursor)
+		if err != nil {
+			return nil, "", err
+		}
+		// Descending: rows before the cursor have started_at < cursorTS, or
+		// same timestamp with id < cursorID.
+		conds = append(conds, "(started_at < ? OR (started_at = ? AND id < ?))")
+		args = append(args, fmtTime(cursorTS), fmtTime(cursorTS), cursorID.String())
+	}
+
+	where := ""
+	if len(conds) > 0 {
+		where = " WHERE " + strings.Join(conds, " AND ")
+	}
+	// Fetch limit+1 to detect whether a next page exists.
+	args = append(args, limit+1)
+	items, err := s.query(ctx,
+		`SELECT `+actCols+` FROM activities`+where+` ORDER BY started_at DESC, id DESC LIMIT ?`, args...)
+	if err != nil {
+		return nil, "", err
+	}
+
+	var next string
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[len(items)-1]
+		next = encodeCursor(last.StartedAt, last.ID)
+	}
+	return items, next, nil
 }
 
 func (s *ActivityStore) MarkRunningAsInterrupted(ctx context.Context, now time.Time) (int, error) {

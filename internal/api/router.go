@@ -43,7 +43,8 @@ func NewRouter(h *Handler) http.Handler {
 		r.Get("/healthz", h.Health)
 		r.With(authLimit).Get("/auth/login", h.AuthLogin)
 		r.With(authLimit).Get("/auth/callback", h.AuthCallback)
-		r.Post("/auth/logout", h.AuthLogout)
+		// R-12: logout mutates the session cookie; require same-origin.
+		r.With(requireSameOrigin).Post("/auth/logout", h.AuthLogout)
 	})
 
 	// API: session required when auth is enabled.
@@ -56,7 +57,8 @@ func NewRouter(h *Handler) http.Handler {
 			r.Get("/api/v1/backups", h.ListBackups)
 			r.Get("/api/v1/backups/{name}", h.GetBackup)
 			r.Get("/api/v1/backups/{name}/activities", h.ListBackupActivities)
-			r.Post("/api/v1/backups/{name}/run", h.RunBackup)
+			// R-12: run mutates state (starts a job); require same-origin.
+			r.With(requireSameOrigin).Post("/api/v1/backups/{name}/run", h.RunBackup)
 			r.Get("/api/v1/activities", h.ListActivities)
 			r.Get("/api/v1/activities/{id}", h.GetActivity)
 			r.Get("/api/v1/activities/{id}/log", h.GetActivityLog)

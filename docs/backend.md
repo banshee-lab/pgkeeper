@@ -23,13 +23,17 @@ The main runtime components are:
 | `internal/backup` | Asynchronous execution, overlap prevention, phase tracking, and shutdown |
 | `internal/executor` | PostgreSQL dump commands executed through the Docker CLI |
 | `internal/restic` | Restic CLI invocation, repository checks, snapshots, retention, and secret redaction |
-| `internal/logstore` and `internal/events` | Per-execution log files, live log tails, and in-memory event streams |
+| `internal/logstore` and `internal/events` | Per-execution log files, live log tails, in-memory event streams, and log redaction |
 | `internal/notify` | Failure notifications, including Telegram |
 | `internal/auth` | Optional OIDC login and server-side session handling |
-| `internal/api` | HTTP routes, handlers, authentication middleware, and SSE streams |
+| `internal/api` | HTTP routes, handlers, authentication middleware, SSE streams, and origin enforcement |
 
 Application logs are structured JSON written to standard output. Execution logs
-are separate files under `global.log_path`.
+are separate files under `global.log_path`. Subprocess stderr (pg_dump output)
+is passed through a line-level redactor before being written to the log file;
+secrets known to pgkeeper (the restic repository password and any URL-embedded
+credentials) are replaced with `***`. PostgreSQL passwords are managed inside
+the containers and are not supplied to pgkeeper.
 
 ## Backup lifecycle
 
@@ -60,8 +64,9 @@ passwords. Restic runs in the pgkeeper process environment and uses
 `RESTIC_PASSWORD` for its repository password.
 
 The scheduler timezone is `global.timezone` (system local time by default).
-Configuration is loaded only at startup; restart the service after changing
-configuration or its environment.
+The resolved IANA timezone name is returned as the `timezone` field in the
+backup list and detail responses. Configuration is loaded only at startup;
+restart the service after changing configuration or its environment.
 
 ## Configuration and persistence
 
@@ -85,6 +90,12 @@ the `pgkeeper_session` cookie created by OIDC login. If `[auth]` is absent, the
 API is open; production deployments should configure OIDC and restrict network
 access.
 
+`POST /auth/logout` and `POST /api/v1/backups/{name}/run` enforce a same-origin
+check. The server compares the `Origin` header (or `Referer` when `Origin` is
+absent) against the `Host` of the incoming request. Requests with a missing or
+cross-origin source header receive `403`. Reverse proxies must preserve the
+`Host` header and must not strip `Origin` or `Referer`.
+
 The API includes:
 
 | Route | Purpose |
@@ -92,17 +103,27 @@ The API includes:
 | `GET /healthz` | Liveness/readiness check |
 | `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout` | OIDC session flow |
 | `GET /api/v1/me` | Current authentication state |
-| `GET /api/v1/backups`, `GET /api/v1/backups/{name}` | Configured backup details |
-| `GET /api/v1/backups/{name}/activities` | Recent activity for one backup |
+| `GET /api/v1/backups`, `GET /api/v1/backups/{name}` | Configured backup details, including `timezone` and `last_success_at` |
+| `GET /api/v1/backups/{name}/activities` | Paginated activity history for one backup |
 | `POST /api/v1/backups/{name}/run` | Start a manual backup |
-| `GET /api/v1/activities`, `GET /api/v1/activities/{id}` | Recent activity and its details |
-| `GET /api/v1/activities/{id}/log` | Read an activity log |
+| `GET /api/v1/activities`, `GET /api/v1/activities/{id}` | Paginated activity list and single-activity detail |
+| `GET /api/v1/activities/{id}/log` | Read an activity log; add `?download=1` for a file download |
 | `GET /api/v1/activities/{id}/log/stream` | Replay and follow an activity log over SSE |
 | `GET /api/v1/jobs`, `GET /api/v1/jobs/stream` | Current jobs and job-event SSE stream |
 
-Activity list limits are capped at 10. Manual starts return `202` when accepted,
-`409` if that backup is already running, and `503` during shutdown. The complete
-request and response schema is in [openapi.yaml](openapi.yaml).
+Activity list endpoints accept `limit` (1–100, default 10), `status`
+(`running`/`success`/`error`), `since` (RFC3339 lower bound on `started_at`),
+and `cursor` (opaque next-page token). A `next` field in the response carries
+the cursor for the next page when one exists.
+
+SSE streams send `retry: 3000` as the first line so that browsers reconnect
+after 3 seconds on disconnect. When auth is enabled and the session expires
+while a stream is open, the server closes the connection without further events;
+clients must reconnect and obtain a fresh session.
+
+Manual starts return `202` when accepted, `409` if that backup is already
+running, and `503` during shutdown. The complete request and response schema is
+in [openapi.yaml](openapi.yaml).
 
 ## Running and operating
 
@@ -111,22 +132,3 @@ Build and run the backend from the repository root:
 ```sh
 go build -o bin/pgkeeper ./cmd/pgkeeper
 ./bin/pgkeeper -config /etc/pgkeeper/pgkeeper.toml
-```
-
-Useful one-shot commands (they load and validate the selected configuration
-first):
-
-```sh
-./bin/pgkeeper -config /etc/pgkeeper/pgkeeper.toml -check
-./bin/pgkeeper -config /etc/pgkeeper/pgkeeper.toml -check-restic
-./bin/pgkeeper -config /etc/pgkeeper/pgkeeper.toml -notify-test
-./bin/pgkeeper -config /etc/pgkeeper/pgkeeper.toml -run main_db
-```
-
-`-check` prints a secret-redacted configuration summary. `-check-restic`
-checks the restic version and each distinct repository without initializing
-missing repositories. `-run NAME` runs one backup and exits instead of starting
-the HTTP server and scheduler. `-notify-test` sends a test Telegram message and
-requires `[telegram]`.
-
-For production setup, see [Production deployment](production.md).

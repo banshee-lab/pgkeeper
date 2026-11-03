@@ -26,7 +26,11 @@ func TestRouterBasics(t *testing.T) {
 		{"GET", "/nope", 404},
 	} {
 		rec := httptest.NewRecorder()
-		srv.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		if tc.method == "POST" {
+			req.Header.Set("Origin", "http://"+req.Host)
+		}
+		srv.ServeHTTP(rec, req)
 		if rec.Code != tc.want {
 			t.Errorf("%s %s = %d, want %d", tc.method, tc.path, rec.Code, tc.want)
 		}

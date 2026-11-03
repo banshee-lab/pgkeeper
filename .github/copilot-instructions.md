@@ -2,12 +2,14 @@
 
 ## Build, test, and lint
 
-- Build: `go build ./...`
-- Run all unit tests: `go test ./...`
-- Run tests with the race detector: `go test -race ./...`
+- Build: `make build`
+- Run pgkeeper with the default config: `make run`; override with `make run CONFIG=/path/to/pgkeeper.toml`
+- Run all unit tests: `make test`
+- Run tests with the race detector: `make race`
 - Run one test: `go test ./internal/config -run '^TestDefaults$'`
-- Run the opt-in restic integration test: `go test -tags=integration ./internal/restic -run '^TestIntegrationBackupRetentionRestore$'` (requires `restic` on `PATH`)
-- Static checks: `go vet ./...` and `golangci-lint run ./...`
+- Run the opt-in restic integration test: `make integration` (requires `restic` on `PATH`)
+- Static checks: `make vet` and `make lint`; `make check` runs unit tests and `go vet`
+- Remove the built binary: `make clean`
 
 ## Architecture
 
