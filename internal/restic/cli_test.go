@@ -122,7 +122,7 @@ func TestForgetArgs(t *testing.T) {
 
 func TestBackupArgs(t *testing.T) {
 	got := backupArgs("t", "h", []string{"app.sql", "app_roles.sql"})
-	want := []string{"backup", "--tag", "t", "--host", "h", "--retry-lock", "5m", "--", "app.sql", "app_roles.sql"}
+	want := []string{"backup", "--json", "--tag", "t", "--host", "h", "--retry-lock", "5m", "--", "app.sql", "app_roles.sql"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
