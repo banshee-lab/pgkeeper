@@ -19,6 +19,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Prepare empty web assets directory
+        run: mkdir -p web/build && touch web/build/.gitkeep
+
       - name: Run backend tests
         run: go test ./...
 
@@ -64,7 +67,7 @@ jobs:
           komodo_address: ${{ vars.KOMODO_URL }}
           komodo_api_key: ${{ secrets.KOMODO_API_KEY }}
           komodo_api_secret: ${{ secrets.KOMODO_API_SECRET }}
-          stack_name: ${{ vars.STACK_NAME }}
+          stack_name: ${{ vars.STACK_NAME || github.event.repository.name }}
           telegram_token: ${{ secrets.TELEGRAM_TOKEN }}
           telegram_to: ${{ secrets.TELEGRAM_TO }}
-          commit_message: ${{ vars.STACK_NAME }}
+          commit_message: ${{ vars.STACK_NAME || github.event.repository.name }}
