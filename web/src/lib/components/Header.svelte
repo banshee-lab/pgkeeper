@@ -25,7 +25,7 @@
 			☰
 		</Button>
 		<a href="/" class="flex items-center gap-2 font-mono font-semibold tracking-tight text-on-surface">
-			<span class="grid h-7 w-7 place-items-center rounded-[3px] bg-primary font-extrabold text-on-primary">p</span>
+			<img src="/favicon.png" alt="" aria-hidden="true" class="h-7 w-7 rounded-[3px] object-contain" />
 			<span>pgkeeper</span>
 		</a>
 	</div>
