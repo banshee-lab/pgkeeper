@@ -76,3 +76,39 @@ func TestSessionExpiryAndSingleUseState(t *testing.T) {
 		t.Fatal("state reused")
 	}
 }
+
+func TestSnapshotStoreKeepsLatestPerBackup(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	ss, ctx := NewSnapshotStore(db), context.Background()
+	at := time.Now().UTC().Truncate(time.Second)
+
+	if got, err := ss.LatestByBackup(ctx, []string{"a"}); err != nil || len(got) != 0 {
+		t.Fatalf("empty store: %v %v", got, err)
+	}
+	for _, sn := range []domain.SnapshotInfo{
+		{ID: "old", Timestamp: at.Add(-time.Hour), FilesAdded: 9, FilesChanged: 9, BytesAdded: 9},
+		{ID: "new", Timestamp: at, FilesAdded: 2, FilesChanged: 1, BytesAdded: 1 << 40},
+	} {
+		if err := ss.SaveLatest(ctx, "a", sn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ss.SaveLatest(ctx, "b", domain.SnapshotInfo{ID: "other", Timestamp: at}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ss.LatestByBackup(ctx, []string{"a", "nope"})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %v err %v", got, err)
+	}
+	g := got["a"]
+	if g.ID != "new" || !g.Timestamp.Equal(at) || g.FilesAdded != 2 || g.FilesChanged != 1 || g.BytesAdded != 1<<40 {
+		t.Fatalf("got %+v", g)
+	}
+}

@@ -26,6 +26,7 @@ type Deps struct {
 	Catalog    domain.BackupCatalog
 	Global     domain.GlobalConfig
 	Activities domain.ActivityRepository
+	Snapshots  domain.SnapshotRepository // optional: the latest snapshot is not recorded without it
 	Exec       domain.Executor
 	Restic     domain.ResticClient
 	Notifier   domain.Notifier
@@ -44,6 +45,7 @@ type Deps struct {
 type Runner struct {
 	Deps
 	jobs     *JobTracker
+	gate     repoGate // serialises the restic phase per repository
 	wg       sync.WaitGroup
 	mu       sync.Mutex // guards stopping
 	stopping bool
@@ -386,6 +388,24 @@ func (r *Runner) dump(ctx context.Context, cfg domain.BackupConfig, act domain.A
 func (r *Runner) resticPhase(ctx context.Context, cfg domain.BackupConfig, act domain.Activity, lg execLog,
 	dir string, files []string) (resultErr error) {
 
+	// Backups sharing a repository take turns (FIFO): EnsureRepo, Backup and
+	// Forget run as one unit, so there is no check-then-init race and restic
+	// never hits a lock held by a sibling run. Dumps still run in parallel.
+	queuedAt := time.Now()
+	release, err := r.gate.acquire(ctx, cfg.Restic.Repository, cfg.Name, func(holder string, ahead int) {
+		r.setPhase(cfg, act, domain.PhaseQueued)
+		r.Logger.Info("backup waiting for shared repository",
+			"activity", act.ID, "backup", cfg.Name, "held_by", holder, "ahead", ahead)
+		lg.Logf("INFO", "phase %s: repository is in use by backup %q (%d ahead in queue), waiting", domain.PhaseQueued, holder, ahead)
+	})
+	if err != nil {
+		return fmt.Errorf("restic: waiting for repository: %w", err)
+	}
+	defer release()
+	if waited := time.Since(queuedAt); waited >= time.Second {
+		lg.Logf("INFO", "phase %s: repository acquired after %s", domain.PhaseQueued, waited.Round(time.Millisecond))
+	}
+
 	r.setPhase(cfg, act, domain.PhaseRestic)
 	r.Logger.Info("backup phase started",
 		"activity", act.ID,
@@ -407,9 +427,12 @@ func (r *Runner) resticPhase(ctx context.Context, cfg domain.BackupConfig, act d
 	if err := r.Restic.EnsureRepo(ctx, cfg.Restic, lg); err != nil {
 		return fmt.Errorf("restic: %w", err)
 	}
-	if err := r.Restic.Backup(ctx, cfg.Restic, cfg.ResticTag, cfg.Name, dir, files, lg); err != nil {
+	snapAt := r.Clock().UTC()
+	snap, err := r.Restic.Backup(ctx, cfg.Restic, cfg.ResticTag, cfg.Name, dir, files, lg)
+	if err != nil {
 		return fmt.Errorf("restic: %w", err)
 	}
+	r.recordSnapshot(ctx, cfg, act, lg, snap, snapAt)
 	if err := r.Restic.Forget(ctx, cfg.Restic, cfg.ResticTag, cfg.Name, lg); err != nil {
 		return fmt.Errorf("restic: %w", err)
 	}
@@ -420,6 +443,28 @@ func (r *Runner) resticPhase(ctx context.Context, cfg domain.BackupConfig, act d
 		"phase", domain.PhaseRestic,
 		"duration", time.Since(start))
 	return nil
+}
+
+// recordSnapshot stores the latest snapshot of the backup. A storage problem
+// is logged but never fails a backup that already succeeded.
+func (r *Runner) recordSnapshot(ctx context.Context, cfg domain.BackupConfig, act domain.Activity, lg execLog,
+	snap *domain.SnapshotInfo, at time.Time) {
+
+	if r.Snapshots == nil {
+		return
+	}
+	if snap == nil {
+		lg.Logf("WARN", "restic reported no snapshot summary; latest snapshot not updated")
+		return
+	}
+	info := *snap
+	info.Timestamp = at
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := r.Snapshots.SaveLatest(sctx, cfg.Name, info); err != nil {
+		r.Logger.Warn("save latest snapshot failed", "activity", act.ID, "backup", cfg.Name, "snapshot", info.ID, "err", err)
+		lg.Logf("WARN", "could not record snapshot %s: %v", info.ID, err)
+	}
 }
 
 // Shutdown stops accepting runs and waits for running ones until ctx expires,

@@ -44,6 +44,25 @@ type BackupDTO struct {
 	NextRun       *string      `json:"next_run"`
 	LastSuccessAt *string      `json:"last_success_at"`
 	LastActivity  *ActivityDTO `json:"last_activity"`
+
+	// LatestSnapshot is the snapshot created by the latest successful restic
+	// backup, or null if none was recorded yet.
+	LatestSnapshot *SnapshotDTO `json:"latest_snapshot"`
+}
+
+type SnapshotDTO struct {
+	ID           string `json:"id"`
+	Timestamp    string `json:"timestamp"`
+	FilesAdded   int64  `json:"files_added"`
+	FilesChanged int64  `json:"files_changed"`
+	BytesAdded   int64  `json:"bytes_added"`
+}
+
+func ToSnapshotDTO(s domain.SnapshotInfo) SnapshotDTO {
+	return SnapshotDTO{
+		ID: s.ID, Timestamp: fmtTime(s.Timestamp),
+		FilesAdded: s.FilesAdded, FilesChanged: s.FilesChanged, BytesAdded: s.BytesAdded,
+	}
 }
 
 type JobDTO struct {

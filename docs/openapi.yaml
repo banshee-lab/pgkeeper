@@ -405,7 +405,10 @@ components:
 
     Phase:
       type: string
-      enum: [dump, roles, restic, cleanup]
+      enum: [queued, dump, roles, restic, cleanup]
+      description: |
+        `queued` means the run finished its dumps and waits for another backup
+        that is using the same restic repository.
 
     Activity:
       type: object
@@ -433,9 +436,19 @@ components:
         keep_monthly: { type: integer }
         keep_yearly: { type: integer }
 
+    Snapshot:
+      type: object
+      required: [id, timestamp, files_added, files_changed, bytes_added]
+      properties:
+        id: { type: string, description: Restic snapshot id }
+        timestamp: { type: string, format: date-time, description: When the snapshot was taken }
+        files_added: { type: integer, format: int64, description: New files in the snapshot }
+        files_changed: { type: integer, format: int64 }
+        bytes_added: { type: integer, format: int64, description: Data added to the repository by the snapshot }
+
     Backup:
       type: object
-      required: [name, cron, timezone, container, database, username, host, port, roles, restic, running, next_run, last_success_at, last_activity]
+      required: [name, cron, timezone, container, database, username, host, port, roles, restic, running, next_run, last_success_at, last_activity, latest_snapshot]
       properties:
         name: { type: string }
         cron: { type: string }
@@ -460,6 +473,11 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/Activity'
+        latest_snapshot:
+          nullable: true
+          description: Snapshot created by the latest successful restic backup, or null if none was recorded yet.
+          allOf:
+            - $ref: '#/components/schemas/Snapshot'
 
     Job:
       type: object

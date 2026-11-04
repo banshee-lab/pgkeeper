@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { Heading } from '@runwisp/ui';
 	import type { Backup } from '$lib/api/types';
-	import { cronText, redactUrl } from '$lib/format';
+	import { cronText, formatBytes, formatDateTime, redactUrl, relativeShort } from '$lib/format';
 	import { backups } from '$lib/stores/backups.svelte';
 	import NextRun from './NextRun.svelte';
 	import StatusBullet from './StatusBullet.svelte';
 
 	let { backup }: { backup: Backup } = $props();
 	const status = $derived(backups.statusOf(backup));
+	const snapshot = $derived(backup.latest_snapshot);
 
 	function retentionLabel(backup: Backup): string {
 		const labels = [
@@ -90,6 +91,40 @@
 					<dd class="font-mono text-sm text-on-surface">{retentionLabel(backup)}</dd>
 				</div>
 			</div>
+		</dl>
+
+		<dl class="space-y-3 md:col-span-2">
+			<dt class="font-mono text-[0.66rem] uppercase tracking-[0.14em] text-on-surface-faint">Latest snapshot</dt>
+			{#if snapshot}
+				<div class="grid gap-y-2 md:grid-cols-2">
+					<div>
+						<dt class="text-xs text-on-surface-muted">Snapshot ID</dt>
+						<dd class="font-mono text-sm text-on-surface" title={snapshot.id}>{snapshot.id.slice(0, 8)}</dd>
+					</div>
+					<div>
+						<dt class="text-xs text-on-surface-muted">Taken</dt>
+						<dd class="text-sm text-on-surface" title={formatDateTime(snapshot.timestamp)}>
+							{relativeShort(snapshot.timestamp)} · {formatDateTime(snapshot.timestamp)}
+						</dd>
+					</div>
+					<div>
+						<dt class="text-xs text-on-surface-muted">Files added</dt>
+						<dd class="font-mono text-sm text-on-surface">{snapshot.files_added.toLocaleString()}</dd>
+					</div>
+					<div>
+						<dt class="text-xs text-on-surface-muted">Files changed</dt>
+						<dd class="font-mono text-sm text-on-surface">{snapshot.files_changed.toLocaleString()}</dd>
+					</div>
+					<div>
+						<dt class="text-xs text-on-surface-muted">Data added</dt>
+						<dd class="font-mono text-sm text-on-surface" title="{snapshot.bytes_added.toLocaleString()} bytes">
+							{formatBytes(snapshot.bytes_added)}
+						</dd>
+					</div>
+				</div>
+			{:else}
+				<p class="text-sm text-on-surface-muted">No snapshot recorded yet.</p>
+			{/if}
 		</dl>
 	</div>
 </section>

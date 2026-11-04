@@ -3,6 +3,7 @@ package restic
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -184,7 +185,7 @@ func TestBackupStreamsAndRedacts(t *testing.T) {
 	work := t.TempDir()
 	var lg bytes.Buffer
 	files := []string{"app.sql", "app_roles.sql"}
-	if err := f.cli.Backup(context.Background(), testCfg(), "tag1", "name1", work, files, &lg); err != nil {
+	if _, err := f.cli.Backup(context.Background(), testCfg(), "tag1", "name1", work, files, &lg); err != nil {
 		t.Fatal(err)
 	}
 
@@ -199,7 +200,7 @@ func TestBackupStreamsAndRedacts(t *testing.T) {
 	}
 
 	args := f.read("args")
-	if want := "backup --tag tag1 --host name1 --retry-lock 5m -- app.sql app_roles.sql"; args != want {
+	if want := "backup --json --tag tag1 --host name1 --retry-lock 5m -- app.sql app_roles.sql"; args != want {
 		t.Errorf("args = %q, want %q", args, want)
 	}
 	if strings.Contains(args, testPass) || strings.Contains(args, "pw@") {
@@ -220,7 +221,7 @@ func TestBackupUsesLogf(t *testing.T) {
 	f := newFake(t)
 	f.set("backup", "err", "hello")
 	lg := &logfCap{}
-	if err := f.cli.Backup(context.Background(), testCfg(), "t", "h", t.TempDir(), []string{"a.sql"}, lg); err != nil {
+	if _, err := f.cli.Backup(context.Background(), testCfg(), "t", "h", t.TempDir(), []string{"a.sql"}, lg); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(lg.lines, "INFO [restic] hello") {
@@ -232,7 +233,7 @@ func TestBackupFailure(t *testing.T) {
 	f := newFake(t)
 	f.set("backup", "exit", "1")
 	f.set("backup", "err", "Fatal: boom hunter2")
-	err := f.cli.Backup(context.Background(), testCfg(), "t", "h", t.TempDir(), []string{"a.sql"}, io.Discard)
+	_, err := f.cli.Backup(context.Background(), testCfg(), "t", "h", t.TempDir(), []string{"a.sql"}, io.Discard)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -319,5 +320,69 @@ func TestRepoLock(t *testing.T) {
 	case <-got:
 	case <-time.After(time.Second):
 		t.Fatal("waiter was not released")
+	}
+}
+
+func TestBackupParsesSummary(t *testing.T) {
+	f := newFake(t)
+	f.set("backup", "out", `{"message_type":"status","percent_done":0.5}
+{"message_type":"error","error":{"message":"read denied"},"during":"archival","item":"x.sql"}
+{"message_type":"summary","files_new":2,"files_changed":1,"files_unmodified":4,"data_added":1234,"total_bytes_processed":99,"snapshot_id":"abc123de"}`)
+	var lg bytes.Buffer
+	snap, err := f.cli.Backup(context.Background(), testCfg(), "t", "h", t.TempDir(), []string{"a.sql"}, &lg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap == nil || snap.ID != "abc123de" || snap.FilesAdded != 2 || snap.FilesChanged != 1 || snap.BytesAdded != 1234 {
+		t.Fatalf("snapshot = %+v", snap)
+	}
+	out := lg.String()
+	if strings.Contains(out, "percent_done") || strings.Contains(out, "message_type") {
+		t.Errorf("raw JSON leaked into the log:\n%s", out)
+	}
+	for _, want := range []string{"[restic] error: x.sql: read denied", "[restic] snapshot abc123de saved: 2 new, 1 changed, 4 unmodified files, 1234 bytes added"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestBackupWithoutSummary(t *testing.T) {
+	f := newFake(t)
+	f.set("backup", "out", "plain text, no json")
+	snap, err := f.cli.Backup(context.Background(), testCfg(), "t", "h", t.TempDir(), []string{"a.sql"}, io.Discard)
+	if err != nil || snap != nil {
+		t.Fatalf("snap=%+v err=%v", snap, err)
+	}
+}
+
+func TestLockedRepositoryError(t *testing.T) {
+	for _, tc := range []struct{ name, exit, stderr string }{
+		{"exit code", "11", "Fatal: unable to create lock in backend: repository is already locked by PID 7"},
+		{"message only", "1", "Fatal: repository is already locked exclusively by PID 7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake(t)
+			f.set("backup", "exit", tc.exit)
+			f.set("backup", "err", tc.stderr)
+			_, err := f.cli.Backup(context.Background(), testCfg(), "t", "h", t.TempDir(), []string{"a.sql"}, io.Discard)
+			var ee *ExitError
+			if !errors.As(err, &ee) || !ee.Locked() {
+				t.Fatalf("want a lock ExitError, got %v", err)
+			}
+			if !strings.Contains(err.Error(), "locked by another process, gave up after waiting 5m") {
+				t.Fatalf("unclear error: %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckWaitsForLock(t *testing.T) {
+	f := newFake(t)
+	if _, err := f.cli.Check(context.Background(), testCfg()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.read("args"); got != "cat config --retry-lock 5m" {
+		t.Fatalf("args = %q", got)
 	}
 }

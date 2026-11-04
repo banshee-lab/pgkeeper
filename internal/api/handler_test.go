@@ -280,6 +280,44 @@ func TestListBackups(t *testing.T) {
 	}
 }
 
+type fakeSnaps map[string]domain.SnapshotInfo
+
+func (f fakeSnaps) SaveLatest(_ context.Context, name string, s domain.SnapshotInfo) error {
+	f[name] = s
+	return nil
+}
+func (f fakeSnaps) LatestByBackup(_ context.Context, names []string) (map[string]domain.SnapshotInfo, error) {
+	out := map[string]domain.SnapshotInfo{}
+	for _, n := range names {
+		if s, ok := f[n]; ok {
+			out[n] = s
+		}
+	}
+	return out, nil
+}
+
+func TestGetBackupLatestSnapshot(t *testing.T) {
+	taken := time.Date(2026, 11, 3, 3, 0, 5, 0, time.UTC)
+	snaps := fakeSnaps{"alpha": {ID: "abc123de", Timestamp: taken, FilesAdded: 2, FilesChanged: 1, BytesAdded: 4096}}
+	a := newAPI(t, func(d *Deps) { d.Snapshots = snaps })
+
+	rec := a.do("GET", "/api/v1/backups/alpha", "", "")
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	got := decode[BackupDTO](t, rec).LatestSnapshot
+	want := SnapshotDTO{ID: "abc123de", Timestamp: "2026-11-03T03:00:05Z", FilesAdded: 2, FilesChanged: 1, BytesAdded: 4096}
+	if got == nil || *got != want {
+		t.Fatalf("latest_snapshot = %+v, want %+v", got, want)
+	}
+
+	// No snapshot recorded yet: explicit null.
+	rec = a.do("GET", "/api/v1/backups/beta", "", "")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"latest_snapshot":null`) {
+		t.Fatalf("beta = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestBackupNotFound(t *testing.T) {
 	a := newAPI(t)
 	for _, p := range []string{"/api/v1/backups/zzz", "/api/v1/backups/zzz/activities"} {

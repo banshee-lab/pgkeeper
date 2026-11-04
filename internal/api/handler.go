@@ -30,6 +30,7 @@ type Pinger interface{ PingContext(ctx context.Context) error }
 type Deps struct {
 	DB         Pinger
 	Activities domain.ActivityRepository
+	Snapshots  domain.SnapshotRepository // optional: latest_snapshot is null without it
 	Catalog    domain.BackupCatalog
 	Runner     domain.BackupRunner
 	Scheduler  domain.Scheduler // optional: next_run is null without it
@@ -126,6 +127,12 @@ func (h *Handler) backupViews(ctx context.Context, bs []domain.BackupConfig) ([]
 	if err != nil {
 		return nil, err
 	}
+	var snaps map[string]domain.SnapshotInfo
+	if h.Snapshots != nil {
+		if snaps, err = h.Snapshots.LatestByBackup(ctx, names); err != nil {
+			return nil, err
+		}
+	}
 	tz := h.effectiveTZ()
 	out := make([]BackupDTO, 0, len(bs))
 	for _, b := range bs {
@@ -143,7 +150,12 @@ func (h *Handler) backupViews(ctx context.Context, bs []domain.BackupConfig) ([]
 		// (one SQLite query), never from a separate in-memory read.
 		running := la != nil && la.Status == domain.StatusRunning
 		lsAt, hasSuccess := success[b.Name]
-		out = append(out, ToBackupDTO(b, running, next, la, lsAt, hasSuccess, tz))
+		dto := ToBackupDTO(b, running, next, la, lsAt, hasSuccess, tz)
+		if sn, ok := snaps[b.Name]; ok {
+			s := ToSnapshotDTO(sn)
+			dto.LatestSnapshot = &s
+		}
+		out = append(out, dto)
 	}
 	return out, nil
 }

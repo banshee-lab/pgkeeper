@@ -1,6 +1,6 @@
 export type ActivityStatus = 'running' | 'success' | 'error';
 export type Trigger = 'schedule' | 'manual';
-export type Phase = 'dump' | 'roles' | 'restic' | 'cleanup';
+export type Phase = 'queued' | 'dump' | 'roles' | 'restic' | 'cleanup';
 
 export interface Activity {
 	id: string;
@@ -24,6 +24,14 @@ export interface ResticView {
 	keep_yearly?: number;
 }
 
+export interface Snapshot {
+	id: string;
+	timestamp: string;
+	files_added: number;
+	files_changed: number;
+	bytes_added: number;
+}
+
 export interface Backup {
 	name: string;
 	cron: string;
@@ -39,6 +47,7 @@ export interface Backup {
 	next_run: string | null;
 	last_success_at: string | null;
 	last_activity: Activity | null;
+	latest_snapshot: Snapshot | null;
 }
 
 export interface Job {

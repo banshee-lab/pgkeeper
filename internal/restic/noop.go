@@ -14,11 +14,11 @@ var _ domain.ResticClient = Noop{}
 
 func (Noop) EnsureRepo(context.Context, domain.ResticConfig, io.Writer) error { return nil }
 
-func (Noop) Backup(_ context.Context, _ domain.ResticConfig, tag, host, dir string, files []string, logw io.Writer) error {
+func (Noop) Backup(_ context.Context, _ domain.ResticConfig, tag, host, dir string, files []string, logw io.Writer) (*domain.SnapshotInfo, error) {
 	if l, ok := logw.(interface{ Logf(level, format string, args ...any) }); ok {
 		l.Logf("INFO", "restic disabled (phase 4)")
 	}
-	return nil
+	return nil, nil
 }
 
 func (Noop) Forget(context.Context, domain.ResticConfig, string, string, io.Writer) error { return nil }

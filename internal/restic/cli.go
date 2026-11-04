@@ -17,7 +17,9 @@ import (
 	"github.com/banshee-lab/pgkeeper/internal/domain"
 )
 
-const retryLock = "5m" // needs restic >= 0.16
+// retryLock is how long restic keeps retrying to lock a repository held by
+// another process (e.g. a prune) before failing. Needs restic >= 0.16.
+const retryLock = "5m"
 
 var versionRe = regexp.MustCompile(`restic (\d+)\.(\d+)\.(\d+)`)
 
@@ -75,6 +77,15 @@ func (e *ExitError) Error() string {
 
 func (e *ExitError) Unwrap() error { return e.Err }
 
+// Locked reports whether restic could not lock the repository (exit status 11).
+func (e *ExitError) Locked() bool {
+	if e.Code == 11 {
+		return true
+	}
+	t := strings.ToLower(e.tail)
+	return strings.Contains(t, "repository is already locked") || strings.Contains(t, "unable to create lock")
+}
+
 // ---- per-repository serialisation -------------------------------------------
 
 // lock serialises restic calls per repository; it gives up when ctx is done.
@@ -101,7 +112,7 @@ func (c *CLI) lock(ctx context.Context, repo string) (func(), error) {
 // ---- argv builders (pure, unit-tested) --------------------------------------
 
 func backupArgs(tag, host string, files []string) []string {
-	args := []string{"backup", "--tag", tag, "--host", host, "--retry-lock", retryLock, "--"}
+	args := []string{"backup", "--json", "--tag", tag, "--host", host, "--retry-lock", retryLock, "--"}
 	return append(args, files...)
 }
 
@@ -167,7 +178,8 @@ func lastLine(s string) string {
 
 // run executes restic for cfg's repository. logw == nil means the output is
 // not streamed (only kept for error reporting).
-func (c *CLI) run(ctx context.Context, cfg domain.ResticConfig, dir string, args []string, logw io.Writer) error {
+// tap, when not nil, filters the combined output before it is logged.
+func (c *CLI) run(ctx context.Context, cfg domain.ResticConfig, dir string, args []string, logw io.Writer, tap *backupOutput) error {
 	unlock, err := c.lock(ctx, cfg.Repository)
 	if err != nil {
 		return fmt.Errorf("waiting for repository lock: %w", err)
@@ -187,6 +199,11 @@ func (c *CLI) run(ctx context.Context, cfg domain.ResticConfig, dir string, args
 		out = io.MultiWriter(rw, tail)
 	}
 
+	if tap != nil {
+		tap.dst = out
+		out = tap
+	}
+
 	cmd := exec.CommandContext(ctx, c.bin(), args...)
 	cmd.Dir = dir
 	cmd.Env = env
@@ -196,6 +213,9 @@ func (c *CLI) run(ctx context.Context, cfg domain.ResticConfig, dir string, args
 	cmd.WaitDelay = 15 * time.Second
 
 	runErr := cmd.Run()
+	if tap != nil {
+		_ = tap.Close()
+	}
 	if rw != nil {
 		_ = rw.Close()
 	}
@@ -208,7 +228,11 @@ func (c *CLI) run(ctx context.Context, cfg domain.ResticConfig, dir string, args
 	var ee *exec.ExitError
 	if errors.As(runErr, &ee) {
 		t := red.Redact(string(tail.b))
-		return &ExitError{Code: ee.ExitCode(), Output: lastLine(t), tail: t, Err: runErr}
+		xe := &ExitError{Code: ee.ExitCode(), Output: lastLine(t), tail: t, Err: runErr}
+		if xe.Locked() {
+			xe.Output = "repository is locked by another process, gave up after waiting " + retryLock + ": " + xe.Output
+		}
+		return xe
 	}
 	return fmt.Errorf("run restic: %w", runErr)
 }
@@ -238,7 +262,7 @@ func repoMissing(e *ExitError) bool {
 // Check runs `restic cat config` quietly. exists=false with nil error means
 // the repository is missing; any other failure is returned.
 func (c *CLI) Check(ctx context.Context, cfg domain.ResticConfig) (bool, error) {
-	err := c.run(ctx, cfg, "", []string{"cat", "config"}, nil)
+	err := c.run(ctx, cfg, "", []string{"cat", "config", "--retry-lock", retryLock}, nil, nil)
 	if err == nil {
 		return true, nil
 	}
@@ -262,24 +286,35 @@ func (c *CLI) EnsureRepo(ctx context.Context, cfg domain.ResticConfig, logw io.W
 		return nil
 	}
 	logLine(logw, "INFO", "repository %s does not exist, running init", RedactRepo(cfg.Repository))
-	if err := c.run(ctx, cfg, "", []string{"init"}, logw); err != nil {
+	if err := c.run(ctx, cfg, "", []string{"init"}, logw, nil); err != nil {
 		return fmt.Errorf("init: %w", err)
 	}
 	return nil
 }
 
-func (c *CLI) Backup(ctx context.Context, cfg domain.ResticConfig, tag, host, dir string, files []string, logw io.Writer) error {
+// Backup creates one snapshot and returns its summary, or nil when restic did
+// not report one (the backup itself succeeded). Timestamp is left for the caller.
+func (c *CLI) Backup(ctx context.Context, cfg domain.ResticConfig, tag, host, dir string, files []string, logw io.Writer) (*domain.SnapshotInfo, error) {
 	if logw == nil {
 		logw = io.Discard
 	}
 	if len(files) == 0 {
-		return errors.New("backup: no files to store")
+		return nil, errors.New("backup: no files to store")
 	}
 	logLine(logw, "INFO", "backup: tag=%s host=%s files=%s", tag, host, strings.Join(files, ","))
-	if err := c.run(ctx, cfg, dir, backupArgs(tag, host, files), logw); err != nil {
-		return fmt.Errorf("backup: %w", err)
+	tap := &backupOutput{}
+	if err := c.run(ctx, cfg, dir, backupArgs(tag, host, files), logw, tap); err != nil {
+		return nil, fmt.Errorf("backup: %w", err)
 	}
-	return nil
+	if tap.summary == nil {
+		return nil, nil
+	}
+	return &domain.SnapshotInfo{
+		ID:           tap.summary.SnapshotID,
+		FilesAdded:   tap.summary.FilesNew,
+		FilesChanged: tap.summary.FilesChanged,
+		BytesAdded:   tap.summary.DataAdded,
+	}, nil
 }
 
 func (c *CLI) Forget(ctx context.Context, cfg domain.ResticConfig, tag, host string, logw io.Writer) error {
@@ -291,7 +326,7 @@ func (c *CLI) Forget(ctx context.Context, cfg domain.ResticConfig, tag, host str
 		logLine(logw, "INFO", "retention not configured, skipping forget")
 		return nil
 	}
-	if err := c.run(ctx, cfg, "", args, logw); err != nil {
+	if err := c.run(ctx, cfg, "", args, logw, nil); err != nil {
 		return fmt.Errorf("forget: %w", err)
 	}
 	return nil

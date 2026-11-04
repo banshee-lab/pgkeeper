@@ -51,11 +51,26 @@ returns `409`, while an overlapping scheduled tick is skipped. Each run:
    `roles = true`, it also runs `pg_dumpall --roles-only`.
 3. Writes dump files to a private per-backup directory under
    `global.temp_path`; empty dumps are treated as errors.
-4. Ensures the restic repository exists, creates one snapshot for the run, then
-   applies configured retention when at least one retention value is set.
+4. Waits its turn for the restic repository (see below), ensures it exists,
+   creates one snapshot for the run, records the snapshot summary, then applies
+   configured retention when at least one retention value is set.
 5. Removes temporary dump files, records the final activity status, and
    publishes completion events. On failure it also attempts a Telegram
    notification if Telegram is configured.
+
+Backups that share a restic repository take turns: the restic phase (repository
+check/init, snapshot and retention) of runs targeting the same repository is
+queued in FIFO order, while their dumps still run in parallel. A waiting run
+reports the `queued` phase and logs which backup it waits for; it is neither
+skipped nor failed. Restic commands also wait up to 5 minutes for repository
+locks held by other processes (for example a prune started elsewhere) before
+failing with a "repository is locked by another process" error.
+
+After each successful snapshot pgkeeper stores its id, timestamp, added and
+changed file counts and added bytes per backup (taken from `restic backup
+--json`). The latest one is returned as `latest_snapshot` (null until the first
+snapshot) by the backup list and detail endpoints and shown on the project
+details page.
 
 Commands are invoked directly with argument lists, not through a shell.
 PostgreSQL authentication must already work non-interactively inside each

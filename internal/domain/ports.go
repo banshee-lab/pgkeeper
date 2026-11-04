@@ -40,6 +40,13 @@ type SessionRepository interface {
 	ConsumeAuthState(ctx context.Context, state string, now time.Time) (*AuthState, error)
 }
 
+// SnapshotRepository keeps the latest restic snapshot of each backup.
+type SnapshotRepository interface {
+	// SaveLatest replaces the stored snapshot of the backup.
+	SaveLatest(ctx context.Context, backupName string, s SnapshotInfo) error
+	LatestByBackup(ctx context.Context, names []string) (map[string]SnapshotInfo, error)
+}
+
 type DumpKind string
 const (DumpDatabase DumpKind = "database"; DumpRoles DumpKind = "roles")
 
@@ -56,7 +63,9 @@ type Executor interface {
 
 type ResticClient interface {
 	EnsureRepo(ctx context.Context, cfg ResticConfig, logw io.Writer) error
-	Backup(ctx context.Context, cfg ResticConfig, tag, host string, dir string, files []string, logw io.Writer) error
+	// Backup returns the created snapshot's summary; it is nil (with a nil
+	// error) when restic did not report one.
+	Backup(ctx context.Context, cfg ResticConfig, tag, host string, dir string, files []string, logw io.Writer) (*SnapshotInfo, error)
 	Forget(ctx context.Context, cfg ResticConfig, tag, host string, logw io.Writer) error
 }
 

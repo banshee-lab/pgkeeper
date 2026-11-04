@@ -17,6 +17,7 @@ const (
 
 type Phase string
 const (
+    PhaseQueued  Phase = "queued" // waiting for another backup using the same restic repository
     PhaseDump    Phase = "dump"
     PhaseRoles   Phase = "roles"
     PhaseRestic  Phase = "restic"

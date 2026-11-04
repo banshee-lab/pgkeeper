@@ -49,6 +49,19 @@ export function formatDuration(milliseconds: number | null | undefined): string 
 	return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
+export function formatBytes(bytes: number | null | undefined): string {
+	if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '—';
+	const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+	let value = bytes;
+	let unit = 0;
+	while (value >= 1024 && unit < units.length - 1) {
+		value /= 1024;
+		unit += 1;
+	}
+	const digits = unit === 0 || value >= 100 ? 0 : value >= 10 ? 1 : 2;
+	return `${value.toFixed(digits)} ${units[unit]}`;
+}
+
 export function formatDateTime(value: string | null): string {
 	if (!value) return '—';
 	const date = new Date(value);
