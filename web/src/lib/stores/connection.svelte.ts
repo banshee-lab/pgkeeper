@@ -77,6 +77,11 @@ function applyFinished(payload: { job: Job; activity: Activity }) {
 		target.last_activity = payload.activity;
 	}
 	activities.upsert(payload.activity);
+	if (payload.activity.status === 'success') {
+		void backups.loadOne(payload.activity.backup_name).catch((reason) => {
+			console.error('Could not refresh backup after successful run:', reason);
+		});
+	}
 	notify('job.finished', payload);
 }
 
