@@ -35,6 +35,7 @@ func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log 
 	}
 
 	activities := store.NewActivityStore(db)
+	snapshots := store.NewSnapshotStore(db)
 	n, err := activities.MarkRunningAsInterrupted(ctx, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("mark interrupted: %w", err)
@@ -64,6 +65,7 @@ func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log 
 		Catalog:    cfg,
 		Global:     cfg.Global,
 		Activities: activities,
+		Snapshots:  snapshots,
 		Exec:       docker,
 		Restic:     resticCLI,
 		Notifier:   notifier,
@@ -101,6 +103,7 @@ func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log 
 	h := api.NewHandler(api.Deps{
 		DB:         db,
 		Activities: activities,
+		Snapshots:  snapshots,
 		Catalog:    cfg,
 		Runner:     runner,
 		Scheduler:  sched,

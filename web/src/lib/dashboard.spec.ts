@@ -32,7 +32,8 @@ function backup(name: string, finishedAt: string | null, status: Activity['statu
 		running,
 		next_run: null,
 		last_success_at: null,
-		last_activity
+		last_activity,
+		latest_snapshot: null
 	};
 }
 

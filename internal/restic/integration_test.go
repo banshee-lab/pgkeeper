@@ -63,11 +63,15 @@ func TestIntegrationBackupRetentionRestore(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		_ = os.WriteFile(filepath.Join(work, "app.sql"), []byte("SELECT "+string(rune('1'+i))+";\n"), 0o600)
 		_ = os.WriteFile(filepath.Join(work, "app_roles.sql"), []byte("CREATE ROLE x;\n"), 0o600)
-		if err := c.Backup(ctx, cfg, "a", "a", work, files, &lg); err != nil {
+		snap, err := c.Backup(ctx, cfg, "a", "a", work, files, &lg)
+		if err != nil {
 			t.Fatalf("backup: %v\n%s", err, lg.String())
 		}
+		if snap == nil || snap.ID == "" || snap.FilesAdded+snap.FilesChanged == 0 {
+			t.Fatalf("backup %d: missing or empty snapshot summary: %+v\n%s", i, snap, lg.String())
+		}
 	}
-	if err := c.Backup(ctx, cfg, "b", "b", work, files[:1], &lg); err != nil {
+	if _, err := c.Backup(ctx, cfg, "b", "b", work, files[:1], &lg); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(snapshots(t, cfg)); n != 4 {

@@ -1,4 +1,4 @@
-import type { Activity, Backup, Me } from './types';
+import type { Activity, Backup, Me, Snapshot } from './types';
 
 const now = Date.now();
 const at = (offsetMs: number) => new Date(now - offsetMs).toISOString();
@@ -139,7 +139,18 @@ const activities: Activity[] = [
 	}
 ];
 
-const defaultBackup = (name: string, lastActivity: Activity | null, running = false): Backup => ({
+const snapshotFor = (activity: Activity | null, index: number): Snapshot | null =>
+	activity?.status === 'success' && activity.finished_at
+		? {
+				id: `${(0xa1b2c3d4 + index * 0x1111).toString(16)}e5f6a7b8c9d0`,
+				timestamp: activity.started_at,
+				files_added: 2 + index,
+				files_changed: index % 3,
+				bytes_added: (index + 1) * 7_340_032
+			}
+		: null;
+
+const defaultBackup = (name: string, lastActivity: Activity | null, running = false, index = 0): Backup => ({
 	name,
 	cron: '0 */6 * * *',
 	timezone: 'UTC',
@@ -160,7 +171,8 @@ const defaultBackup = (name: string, lastActivity: Activity | null, running = fa
 	running,
 	next_run: at(-3_600_000),
 	last_success_at: lastActivity?.status === 'success' ? lastActivity.finished_at : null,
-	last_activity: lastActivity
+	last_activity: lastActivity,
+	latest_snapshot: snapshotFor(lastActivity, index)
 });
 
 export const mockMe: Me = {
@@ -170,16 +182,16 @@ export const mockMe: Me = {
 };
 
 export const mockBackups: Backup[] = [
-	defaultBackup('billing-prod', activities[0]),
-	defaultBackup('analytics', activities[1]),
-	defaultBackup('customers', activities[2]),
-	defaultBackup('inventory', activities[3], true),
-	defaultBackup('auth', activities[4]),
-	defaultBackup('reporting', activities[5]),
-	defaultBackup('staging', activities[6]),
-	defaultBackup('events', activities[7]),
-	defaultBackup('ledger', activities[8]),
-	defaultBackup('search', activities[9]),
+	defaultBackup('billing-prod', activities[0], false, 0),
+	defaultBackup('analytics', activities[1], false, 1),
+	defaultBackup('customers', activities[2], false, 2),
+	defaultBackup('inventory', activities[3], true, 3),
+	defaultBackup('auth', activities[4], false, 4),
+	defaultBackup('reporting', activities[5], false, 5),
+	defaultBackup('staging', activities[6], false, 6),
+	defaultBackup('events', activities[7], false, 7),
+	defaultBackup('ledger', activities[8], false, 8),
+	defaultBackup('search', activities[9], false, 9),
 	defaultBackup('new-service', null)
 ];
 

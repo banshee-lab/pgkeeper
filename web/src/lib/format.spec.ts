@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	cronText,
+	formatBytes,
 	formatDuration,
 	nextRunUpdateDelay,
 	redactUrl,
@@ -82,5 +83,26 @@ describe('display formatters', () => {
 		expect(stripAnsi('\u001b[31mERROR\u001b[0m')).toBe('ERROR');
 		expect(cronText('0 0 * * *')).toContain('12:00');
 		expect(cronText('not-a-cron')).toBe('not-a-cron');
+	});
+});
+
+
+describe('formatBytes', () => {
+	it.each([
+		[0, '0 B'],
+		[1023, '1023 B'],
+		[1536, '1.50 KiB'],
+		[10 * 1024, '10.0 KiB'],
+		[250 * 1024 * 1024, '250 MiB'],
+		[5 * 1024 ** 3, '5.00 GiB']
+	])('formats %i bytes', (bytes, expected) => {
+		expect(formatBytes(bytes)).toBe(expected);
+	});
+
+	it('handles missing and invalid values', () => {
+		expect(formatBytes(null)).toBe('—');
+		expect(formatBytes(undefined)).toBe('—');
+		expect(formatBytes(-1)).toBe('—');
+		expect(formatBytes(Number.NaN)).toBe('—');
 	});
 });

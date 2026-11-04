@@ -30,7 +30,8 @@ function backup(running: boolean, lastStatus: 'success' | 'error' | null): Backu
 					error: null,
 					log_url: ''
 				}
-			: null
+			: null,
+		latest_snapshot: null
 	};
 }
 

@@ -29,7 +29,9 @@ func TestResponsesMatchOpenAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a := newAPI(t)
+	a := newAPI(t, func(d *Deps) {
+		d.Snapshots = fakeSnaps{"alpha": {ID: "abc123de", Timestamp: time.Now().UTC(), FilesAdded: 1, FilesChanged: 2, BytesAdded: 3}}
+	})
 	done := a.addActivity("alpha", time.Now().Add(-time.Hour).UTC(), domain.StatusError)
 	a.addActivity("alpha", time.Now().UTC(), domain.StatusRunning)
 	if err := os.WriteFile(done.LogPath, []byte("l1\n"), 0o600); err != nil {
