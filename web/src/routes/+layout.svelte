@@ -10,7 +10,6 @@
 	import { session } from '$lib/stores/session.svelte';
 	import AppShell from '$lib/components/AppShell.svelte';
 	import LoginScreen from '$lib/components/LoginScreen.svelte';
-	import favicon from '#lib/assets/favicon.svg';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
@@ -44,7 +43,7 @@
 </script>
 
 <svelte:head>
-	<link rel="icon" href={favicon} />
+	<link rel="icon" href="/favicon.png" />
 </svelte:head>
 
 <ToastContainer />
