@@ -18,6 +18,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pgkeeper ./cmd/pgk
 
 # Runtime dependencies for backup and Docker operations.
 FROM alpine:3.22
+LABEL org.opencontainers.image.source https://github.com/banshee-lab/pgkeeper
+
 RUN apk add --no-cache ca-certificates docker-cli restic tzdata \
     && install -d /etc/pgkeeper \
     && install -d -m 1777 /var/lib/pgkeeper /var/log
