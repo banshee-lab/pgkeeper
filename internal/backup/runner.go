@@ -54,6 +54,15 @@ type Runner struct {
 }
 
 var _ domain.BackupRunner = (*Runner)(nil)
+var _ domain.RepoLocker = (*Runner)(nil)
+
+// AcquireRepo takes the per-repository gate used by the restic phase of
+// backups, so repository maintenance (prune/check) queues with backups
+// instead of colliding with them on the restic lock. Release the returned
+// function when done.
+func (r *Runner) AcquireRepo(ctx context.Context, repo, owner string, onWait func(holder string, ahead int)) (func(), error) {
+	return r.gate.acquire(ctx, repo, owner, onWait)
+}
 
 func NewRunner(d Deps) *Runner {
 	if d.Logger == nil {

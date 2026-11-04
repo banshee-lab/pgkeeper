@@ -6,6 +6,9 @@ type ResticConfig struct {
     Repository  string
     Password    Secret
     KeepDaily, KeepWeekly, KeepMonthly, KeepYearly int // 0 = unset
+    // SkipPrune makes the per-backup forget leave the data alone (no --prune);
+    // space is then reclaimed only by the scheduled prune.
+    SkipPrune bool
 }
 
 type BackupConfig struct {

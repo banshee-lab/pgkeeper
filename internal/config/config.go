@@ -31,6 +31,8 @@ type Config struct {
 	Telegram *TelegramConfig       // nil = disabled
 	Auth     *AuthConfig           // nil = disabled
 	Backups  []domain.BackupConfig // sorted by name
+	// Maintenance holds the global [restic] prune/check schedules.
+	Maintenance domain.MaintenanceConfig
 	Warnings []string              // non-fatal findings; the caller logs them
 }
 
@@ -71,6 +73,9 @@ func (c *Config) LogSafe() string {
 	} else {
 		b.WriteString("auth: disabled (API is open)\n")
 	}
+	m := c.Maintenance
+	fmt.Fprintf(&b, "restic maintenance: prune_cron=%q check_cron=%q check_read_percent=%d\n",
+		m.PruneCron, m.CheckCron, m.ReadPercent())
 	fmt.Fprintf(&b, "backups: %d\n", len(c.Backups))
 	for _, bc := range c.Backups {
 		fmt.Fprintf(&b, "  - %s: cron=%q container=%s database=%s tag=%s roles=%t repo=%s\n",

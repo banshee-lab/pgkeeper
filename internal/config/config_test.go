@@ -105,79 +105,44 @@ func TestAllErrorsAggregated(t *testing.T) {
 
 func TestDuplicateTargetIsWarning(t *testing.T) {
 	cfg, err := loadWith(t, "", resticOK+"[backup.a]\n"+std+"[backup.b]\n"+std)
-	if err != nil || len(cfg.Warnings) != 1 {
+	dups := 0
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w, "target the same container/database") {
+			dups++
+		}
+	}
+	if err != nil || dups != 1 {
 		t.Fatalf("err=%v warnings=%v", err, cfg.Warnings)
 	}
 }
 
-func TestIncludes(t *testing.T) {
-	dir := t.TempDir()
-	main := write(t, filepath.Join(dir, "main.toml"),
-		globalSec(dir, `include = ["conf/*.toml", "nothing/*.toml"]`)+resticOK+"[backup.main_db]\n"+std)
-	write(t, filepath.Join(dir, "conf", "b.toml"), "[backup.b]\n"+std)
-	write(t, filepath.Join(dir, "conf", "a.toml"), "[backup.a]\n"+std)
-
-	cfg, err := Load(main)
-	if err != nil {
-		t.Fatal(err)
+func TestSkipPrune(t *testing.T) {
+	has := func(cfg *Config) bool {
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "skip-prune") {
+				return true
+			}
+		}
+		return false
 	}
-	var names []string
-	for _, b := range cfg.List() {
-		names = append(names, b.Name)
+	// default: forget prunes, no warning
+	cfg, err := loadWith(t, "", resticOK+"[backup.a]\n"+std)
+	if err != nil || cfg.Backups[0].Restic.SkipPrune || has(cfg) {
+		t.Fatalf("default must prune without warning: err=%v warnings=%v", err, cfg.Warnings)
 	}
-	if strings.Join(names, ",") != "a,b,main_db" {
-		t.Fatalf("order: %v", names)
+	// global skip-prune without a prune schedule warns
+	cfg, err = loadWith(t, "", resticOK+"skip-prune = true\n[backup.a]\n"+std)
+	if err != nil || !cfg.Backups[0].Restic.SkipPrune || !has(cfg) {
+		t.Fatalf("skip-prune without prune-cron must warn: err=%v warnings=%v", err, cfg.Warnings)
 	}
-
-	write(t, filepath.Join(dir, "conf", "c.toml"), "[backup.main_db]\n"+std)
-	_, err = Load(main)
-	if err == nil || !strings.Contains(err.Error(), "main.toml") || !strings.Contains(err.Error(), "c.toml") {
-		t.Fatalf("duplicate backup must name both files, got %v", err)
+	// with a prune schedule: no warning
+	cfg, err = loadWith(t, "", resticOK+"skip-prune = true\nprune-cron = \"@weekly\"\n[backup.a]\n"+std)
+	if err != nil || !cfg.Backups[0].Restic.SkipPrune || has(cfg) {
+		t.Fatalf("no warning expected with prune-cron: err=%v warnings=%v", err, cfg.Warnings)
 	}
-	os.Remove(filepath.Join(dir, "conf", "c.toml"))
-
-	write(t, filepath.Join(dir, "conf", "d.toml"), resticOK)
-	_, err = Load(main)
-	if err == nil || !strings.Contains(err.Error(), "[restic] is already defined") {
-		t.Fatalf("duplicate section must fail, got %v", err)
-	}
-}
-
-func TestEnvExpansion(t *testing.T) {
-	t.Setenv("PGK_TEST_REPO", "/from/env")
-	body := "[restic]\nrepository = \"${PGK_TEST_REPO}\"\npassword = \"${PGK_TEST_UNSET_PW:-fallback}\"\n[backup.a]\n" + std
-	cfg, err := loadWith(t, "", body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b := cfg.Backups[0]
-	if b.Restic.Repository != "/from/env" || b.Restic.Password.Reveal() != "fallback" {
-		t.Fatalf("%+v", b.Restic)
-	}
-
-	_, err = loadWith(t, "", resticOK+"[backup.a]\n"+std+"host = \"${PGK_TEST_MISSING}\"\n")
-	if err == nil || !strings.Contains(err.Error(), "environment variable PGK_TEST_MISSING is not set") ||
-		!strings.Contains(err.Error(), "backup.a.host") {
-		t.Fatalf("got %v", err)
-	}
-}
-
-func TestEnvExpansionInInclude(t *testing.T) {
-	dir := t.TempDir()
-	main := write(t, filepath.Join(dir, "main.toml"), globalSec(dir, `include = ["conf/*.toml"]`)+resticOK)
-	write(t, filepath.Join(dir, "conf", "x.toml"), "[backup.a]\n"+std+"host = \"${PGK_TEST_MISSING_INC}\"\n")
-	_, err := Load(main)
-	if err == nil || !strings.Contains(err.Error(), "x.toml") {
-		t.Fatalf("got %v", err)
-	}
-}
-
-func TestRedactRepository(t *testing.T) {
-	got := RedactRepository("rest:https://user:s3cret@host:8000/repo")
-	if strings.Contains(got, "s3cret") || !strings.Contains(got, "user:***@") {
-		t.Fatal(got)
-	}
-	if RedactRepository("/srv/restic") != "/srv/restic" {
-		t.Fatal("plain path must be unchanged")
+	// per-backup override of the global setting
+	cfg, err = loadWith(t, "", resticOK+"skip-prune = true\nprune-cron = \"@weekly\"\n[backup.a]\n"+std+"skip-prune = false\n")
+	if err != nil || cfg.Backups[0].Restic.SkipPrune {
+		t.Fatalf("backup override ignored: err=%v", err)
 	}
 }

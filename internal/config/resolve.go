@@ -112,6 +112,7 @@ func (l *loader) resolve() (*Config, []error) {
 		gr = *r.Restic
 		errs = append(errs, checkKeeps(l.src["restic"], "restic.", gr)...)
 	}
+	cfg.Maintenance = resolveMaintenance(l.srcOr("restic"), gr, add)
 
 	// ---- backups ----
 	seen := map[string]string{} // container\x00database -> backup name
@@ -151,6 +152,7 @@ func (l *loader) resolve() (*Config, []error) {
 				KeepWeekly:  firstSet(br.KeepWeekly, gr.KeepWeekly),
 				KeepMonthly: firstSet(br.KeepMonthly, gr.KeepMonthly),
 				KeepYearly:  firstSet(br.KeepYearly, gr.KeepYearly),
+				SkipPrune:   firstSet(br.SkipPrune, gr.SkipPrune),
 			},
 		}
 
@@ -201,5 +203,48 @@ func (l *loader) resolve() (*Config, []error) {
 	if len(cfg.Backups) == 0 {
 		cfg.Warnings = append(cfg.Warnings, "no [backup.*] sections defined; the service will start without jobs")
 	}
+	if cfg.Maintenance.PruneCron == "" {
+		for _, b := range cfg.Backups {
+			if r := b.Restic; r.SkipPrune && r.KeepDaily+r.KeepWeekly+r.KeepMonthly+r.KeepYearly > 0 {
+				cfg.Warnings = append(cfg.Warnings, "backup "+b.Name+" has skip-prune = true but restic.prune-cron is not set: "+
+					"forgotten snapshots are never pruned, so repository space is not reclaimed")
+				break
+			}
+		}
+	}
 	return cfg, errs
+}
+// resolveMaintenance validates the global prune/check settings. A task whose
+// cron is empty is disabled; the read percentage defaults to 80.
+func resolveMaintenance(file string, gr rawRestic, add func(error)) domain.MaintenanceConfig {
+	m := domain.MaintenanceConfig{
+		PruneCron:        strings.TrimSpace(deref(gr.PruneCron, "")),
+		CheckCron:        strings.TrimSpace(deref(gr.CheckCron, "")),
+		CheckReadPercent: deref(gr.CheckReadPercent, domain.DefaultCheckReadPercent),
+	}
+	for _, c := range []struct{ key, spec string }{
+		{"restic.prune-cron", m.PruneCron}, {"restic.check-cron", m.CheckCron},
+	} {
+		if c.spec == "" {
+			continue
+		}
+		if _, err := CronParser.Parse(c.spec); err != nil {
+			add(keyErr(file, c.key, "invalid cron expression %q: %v", c.spec, err))
+		}
+	}
+	if m.CheckReadPercent < 1 || m.CheckReadPercent > 100 {
+		add(keyErr(file, "restic.check-read-percent", "must be between 1 and 100 (got %d)", m.CheckReadPercent))
+	}
+	if gr.Repository != nil && gr.Password != nil && *gr.Repository != "" && *gr.Password != "" {
+		m.Repo = &domain.ResticConfig{
+			Repository:  *gr.Repository,
+			Password:    domain.Secret(*gr.Password),
+			KeepDaily:   deref(gr.KeepDaily, 0),
+			KeepWeekly:  deref(gr.KeepWeekly, 0),
+			KeepMonthly: deref(gr.KeepMonthly, 0),
+			KeepYearly:  deref(gr.KeepYearly, 0),
+			SkipPrune:   deref(gr.SkipPrune, false),
+		}
+	}
+	return m
 }

@@ -41,3 +41,18 @@ func TestHugeErrorHardTruncated(t *testing.T) {
 		t.Fatalf("got %d runes", n)
 	}
 }
+func TestFormatFailureTitle(t *testing.T) {
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	end := start.Add(90 * time.Second)
+	got := formatFailure(domain.NotifyEvent{
+		Title:    "Restic prune",
+		Backup:   domain.BackupConfig{Name: "/srv/restic"},
+		Activity: domain.Activity{StartedAt: start, FinishedAt: &end, Error: "boom"},
+		LogTail:  "line",
+	}, time.UTC)
+	for _, want := range []string{"❌ Restic prune FAILED: /srv/restic", "Duration:  1m30s", "Error:     boom", "line"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+}

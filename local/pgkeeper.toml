@@ -8,6 +8,8 @@ listen    = ":8080"
 repository = "/tmp/pgk/restic"
 password   = "dev-password"
 keep-daily = 7
+skip-prune = true
+prune-cron = "*/5 * * * *" 
 
 [backup.main_db]
 cron       = "@every 1m"

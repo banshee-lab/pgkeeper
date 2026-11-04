@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/banshee-lab/pgkeeper/blob/main/schemas/pgkeeper.schema.json",
+  "title": "pgkeeper configuration",
+  "description": "Schema for pgkeeper TOML configuration files. Strings support ${NAME} and ${NAME:-default} environment expansion.",
+  "type": "object",
+  "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timezone": {
+          "type": "string",
+          "description": "IANA timezone name."
+        },
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob patterns for additional TOML configuration files."
+        },
+        "temp_path": {
+          "type": "string",
+          "description": "Directory for temporary database dumps."
+        },
+        "log_path": {
+          "type": "string",
+          "description": "Directory for execution logs."
+        },
+        "listen": {
+          "type": "string",
+          "description": "HTTP listen address."
+        },
+        "db_path": {
+          "type": "string",
+          "description": "Path to the SQLite database."
+        }
+      }
+    },
+    "telegram": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bot_token", "chat_id"],
+      "properties": {
+        "bot_token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chat_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer", "client_id", "secret", "redirect_url"],
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Absolute URL of the OIDC issuer."
+        },
+        "client_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "redirect_url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Absolute OIDC callback URL."
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Defaults to [openid, profile, email]."
+        },
+        "session_ttl": {
+          "type": "string",
+          "description": "Positive Go duration, for example 12h or 30m."
+        },
+        "cookie_secure": {
+          "type": "boolean",
+          "default": true
+        },
+        "post_login_redirect": {
+          "type": "string",
+          "default": "/"
+        }
+      }
+    },
+    "restic": {
+      "$ref": "#/$defs/restic"
+    },
+    "backup": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/backup"
+      },
+      "description": "Named backup jobs, represented in TOML as [backup.<name>] sections."
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "restic": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Restic repository; may be supplied here or overridden for each backup."
+        },
+        "password": {
+          "type": "string",
+          "description": "Restic repository password; may be supplied here or overridden for each backup."
+        },
+        "keep-daily": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keep-weekly": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keep-monthly": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keep-yearly": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skip-prune": {
+          "type": "boolean"
+        },
+        "prune-cron": {
+          "type": "string",
+          "description": "Optional cron expression for scheduled pruning."
+        },
+        "check-cron": {
+          "type": "string",
+          "description": "Optional cron expression for scheduled repository checks."
+        },
+        "check-read-percent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 80
+        }
+      }
+    },
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cron", "container", "database"],
+      "properties": {
+        "cron": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Cron expression for the backup schedule."
+        },
+        "container": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Docker container running PostgreSQL."
+        },
+        "database": {
+          "type": "string",
+          "minLength": 1
+        },
+        "username": {
+          "type": "string",
+          "default": "postgres"
+        },
+        "host": {
+          "type": "string",
+          "default": "localhost"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 5432
+        },
+        "restic_tag": {
+          "type": "string",
+          "description": "Defaults to the backup name; must not contain whitespace or commas."
+        },
+        "roles": {
+          "type": "boolean",
+          "default": false
+        },
+        "repository": {
+          "type": "string",
+          "description": "Per-backup override for restic.repository."
+        },
+        "password": {
+          "type": "string",
+          "description": "Per-backup override for restic.password."
+        },
+        "keep-daily": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keep-weekly": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keep-monthly": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keep-yearly": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skip-prune": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

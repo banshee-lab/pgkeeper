@@ -109,6 +109,8 @@ func TestForgetArgs(t *testing.T) {
 			[]string{"forget", "--tag", "t", "--host", "h", "--retry-lock", "5m", "--keep-daily", "3", "--prune"}},
 		{"yearly only", domain.ResticConfig{KeepYearly: 1},
 			[]string{"forget", "--tag", "t", "--host", "h", "--retry-lock", "5m", "--keep-yearly", "1", "--prune"}},
+		{"skip prune", domain.ResticConfig{KeepDaily: 3, SkipPrune: true},
+			[]string{"forget", "--tag", "t", "--host", "h", "--retry-lock", "5m", "--keep-daily", "3"}},
 		{"none", domain.ResticConfig{}, nil},
 	}
 	for _, tc := range cases {
@@ -384,5 +386,51 @@ func TestCheckWaitsForLock(t *testing.T) {
 	}
 	if got := f.read("args"); got != "cat config --retry-lock 5m" {
 		t.Fatalf("args = %q", got)
+	}
+}
+
+func TestMaintenanceArgs(t *testing.T) {
+	if got := strings.Join(pruneArgs(), " "); got != "prune --retry-lock 5m" {
+		t.Fatalf("prune args = %q", got)
+	}
+	if got := strings.Join(checkDataArgs(80), " "); got != "check --retry-lock 5m --read-data-subset=80%" {
+		t.Fatalf("check args = %q", got)
+	}
+	if got := strings.Join(checkDataArgs(100), " "); got != "check --retry-lock 5m --read-data" {
+		t.Fatalf("check 100%% args = %q", got)
+	}
+}
+
+func TestPruneAndCheckData(t *testing.T) {
+	f := newFake(t)
+	if err := f.cli.Prune(context.Background(), testCfg(), io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.cli.CheckData(context.Background(), testCfg(), 80, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"prune --retry-lock 5m", "check --retry-lock 5m --read-data-subset=80%"}
+	if got := f.calls(); !slices.Equal(got, want) {
+		t.Fatalf("calls = %q, want %q", got, want)
+	}
+	if err := f.cli.CheckData(context.Background(), testCfg(), 0, io.Discard); err == nil {
+		t.Fatal("0% must be rejected")
+	}
+}
+
+func TestMaintenanceRepoMissingAndLocked(t *testing.T) {
+	f := newFake(t)
+	f.set("prune", "exit", "10")
+	f.set("prune", "err", "Fatal: repository does not exist")
+	if err := f.cli.Prune(context.Background(), testCfg(), io.Discard); !errors.Is(err, domain.ErrRepoMissing) {
+		t.Fatalf("want ErrRepoMissing, got %v", err)
+	}
+
+	f.set("check", "exit", "11")
+	f.set("check", "err", "Fatal: unable to create lock in backend: repository is already locked by PID 7")
+	err := f.cli.CheckData(context.Background(), testCfg(), 80, io.Discard)
+	var ee *ExitError
+	if !errors.As(err, &ee) || !ee.Locked() {
+		t.Fatalf("want a lock ExitError, got %v", err)
 	}
 }

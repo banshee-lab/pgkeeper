@@ -15,6 +15,7 @@ import (
 	"github.com/banshee-lab/pgkeeper/internal/config"
 	"github.com/banshee-lab/pgkeeper/internal/domain"
 	"github.com/banshee-lab/pgkeeper/internal/notify"
+	"github.com/banshee-lab/pgkeeper/internal/reload"
 )
 
 func main() {
@@ -35,6 +36,7 @@ func run() error {
 	configPath := flag.String("config", envOr("PGKEEPER_CONFIG", "/etc/pgkeeper/pgkeeper.toml"), "path to the TOML config")
 	check := flag.Bool("check", false, "validate the config, print a summary and exit")
 	checkRestic := flag.Bool("check-restic", false, "run 'restic cat config' for every distinct repository and exit")
+	reloadFlag := flag.Bool("reload", false, "validate the config, then ask the running pgkeeper to reload it (SIGHUP) and exit")
 	notifyTest := flag.Bool("notify-test", false, "send a test Telegram message and exit")
 	runName := flag.String("run", "", "run one backup immediately and exit (0 = success)")
 	flag.Parse()
@@ -53,6 +55,16 @@ func run() error {
 	}
 	if *check {
 		fmt.Print(cfg.LogSafe())
+		return nil
+	}
+	if *reloadFlag {
+		// The config was validated by config.Load above; an invalid file never
+		// reaches the daemon.
+		pid, err := reload.Signal(reload.PIDFile(cfg.Global.TempPath))
+		if err != nil {
+			return err
+		}
+		fmt.Printf("config is valid; reload requested from pgkeeper (pid %d), see its log for the result\n", pid)
 		return nil
 	}
 	if *checkRestic {
@@ -85,5 +97,5 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	return app.Run(ctx, cfg, notifier, log, *runName)
+	return app.Run(ctx, cfg, *configPath, notifier, log, *runName)
 }

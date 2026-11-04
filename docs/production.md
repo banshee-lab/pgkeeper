@@ -199,8 +199,10 @@ proxy should:
 - Allow enough read time for long-lived SSE requests and avoid caching API or
   event-stream responses.
 
-After changing configuration or environment values, restart the service;
-configuration is not hot-reloaded. Monitor structured application logs through
+After changing environment values or `global.*`, `[telegram]` or `[auth]`
+settings, restart the service. Other configuration changes can be applied
+without a restart using `pgkeeper -reload` (or `systemctl kill -s HUP
+pgkeeper`, `docker exec pgkeeper pgkeeper -reload`). Monitor structured application logs through
 the system journal and execution log files under `global.log_path`. Back up
 the SQLite database and execution logs according to operational needs, and
 ensure the restic repository itself has an independent durability and recovery
