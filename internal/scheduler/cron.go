@@ -213,3 +213,17 @@ func (s *Cron) NextRun(name string) (time.Time, bool) {
 	}
 	return next.UTC(), true
 }
+
+func (s *Cron) NextMaintenance(kind domain.MaintenanceKind) (time.Time, bool) {
+	s.mu.RLock()
+	e, ok := s.tasks[kind]
+	s.mu.RUnlock()
+	if !ok {
+		return time.Time{}, false
+	}
+	next := s.c.Entry(e.id).Next
+	if next.IsZero() {
+		return time.Time{}, false
+	}
+	return next.UTC(), true
+}

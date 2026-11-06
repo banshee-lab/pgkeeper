@@ -156,11 +156,12 @@ the `pgkeeper_session` cookie created by OIDC login. If `[auth]` is absent, the
 API is open; production deployments should configure OIDC and restrict network
 access.
 
-`POST /auth/logout` and `POST /api/v1/backups/{name}/run` enforce a same-origin
-check. The server compares the `Origin` header (or `Referer` when `Origin` is
-absent) against the `Host` of the incoming request. Requests with a missing or
-cross-origin source header receive `403`. Reverse proxies must preserve the
-`Host` header and must not strip `Origin` or `Referer`.
+`POST /auth/logout`, backup runs, repository maintenance, and force unlock
+enforce a same-origin check. The server compares the `Origin` header (or
+`Referer` when `Origin` is absent) against the `Host` of the incoming request.
+Requests with a missing or cross-origin source header receive `403`. Reverse
+proxies must preserve the `Host` header and must not strip `Origin` or
+`Referer`.
 
 The API includes:
 
@@ -176,6 +177,23 @@ The API includes:
 | `GET /api/v1/activities/{id}/log` | Read an activity log; add `?download=1` for a file download |
 | `GET /api/v1/activities/{id}/log/stream` | Replay and follow an activity log over SSE |
 | `GET /api/v1/jobs`, `GET /api/v1/jobs/stream` | Current jobs and job-event SSE stream |
+| `GET /api/v1/repositories`, `GET /api/v1/repositories/{id}` | Distinct configured repositories, next maintenance times, current restic stats |
+| `GET /api/v1/repositories/{id}/activities` | Prune, check, and unlock history |
+| `POST /api/v1/repositories/{id}/activities` | Start a manual prune or check (`{"kind":"prune"}` or `{"kind":"check"}`) |
+| `POST /api/v1/repositories/{id}/unlock` | Force-remove repository locks; requires same-origin and no pgkeeper activity using the repository |
+| `GET /api/v1/repositories/{id}/snapshots` | List restic snapshots |
+| `GET /api/v1/repositories/{id}/snapshots/{snapshot}/summary` | Derive snapshot stats from `restic diff` |
+| `GET /api/v1/repositories/{id}/snapshots/{snapshot}/tree` | Browse a snapshot; accepts an optional `path` query parameter |
+| `GET /api/v1/repositories/{id}/snapshots/{snapshot}/download?path=…` | Stream one selected file from a snapshot |
+| `GET /api/v1/repositories/{id}/activities/{activity}/log`, `…/log/stream` | Read or follow maintenance console output |
+
+Repository IDs are stable opaque hashes of the configured repository location;
+credential-bearing URLs are never returned. Each repository includes `is_main`
+to identify the global `[restic]` repository and a sorted `backups` list of
+projects that use it. Repositories shared by multiple projects appear once.
+Next prune/check times reflect the next configured maintenance schedule.
+Unlock uses restic's `--remove-all`; it must only be used after confirming no
+external restic process is active.
 
 Activity list endpoints accept `limit` (1–100, default 10), `status`
 (`running`/`success`/`error`), `since` (RFC3339 lower bound on `started_at`),

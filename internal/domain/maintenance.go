@@ -13,8 +13,9 @@ const DefaultCheckReadPercent = 80
 type MaintenanceKind string
 
 const (
-	MaintenancePrune MaintenanceKind = "prune"
-	MaintenanceCheck MaintenanceKind = "check"
+	MaintenancePrune  MaintenanceKind = "prune"
+	MaintenanceCheck  MaintenanceKind = "check"
+	MaintenanceUnlock MaintenanceKind = "unlock"
 )
 
 // MaintenanceConfig holds the global [restic] maintenance settings. An empty
@@ -35,12 +36,13 @@ func (m MaintenanceConfig) ReadPercent() int {
 }
 
 // ResticMaintainer is implemented by the restic client for repository-wide
-// maintenance. Both methods return an error wrapping ErrRepoMissing when the
-// repository does not exist.
+// maintenance and lock cleanup. Maintenance methods return an error wrapping
+// ErrRepoMissing when the repository does not exist.
 type ResticMaintainer interface {
 	Prune(ctx context.Context, cfg ResticConfig, logw io.Writer) error
 	// CheckData runs `restic check` reading readPercent% of the pack data.
 	CheckData(ctx context.Context, cfg ResticConfig, readPercent int, logw io.Writer) error
+	Unlock(ctx context.Context, cfg ResticConfig, logw io.Writer) error
 }
 
 // MaintenanceRunner starts maintenance tasks in the background.

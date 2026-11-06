@@ -51,6 +51,7 @@ func (f *fakeRestic) Prune(ctx context.Context, cfg domain.ResticConfig, _ io.Wr
 func (f *fakeRestic) CheckData(ctx context.Context, cfg domain.ResticConfig, pct int, _ io.Writer) error {
 	return f.do(ctx, call{kind: domain.MaintenanceCheck, repo: cfg.Repository, percent: pct})
 }
+func (f *fakeRestic) Unlock(context.Context, domain.ResticConfig, io.Writer) error { return nil }
 
 func (f *fakeRestic) got() []call {
 	f.mu.Lock()

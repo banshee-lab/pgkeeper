@@ -9,11 +9,16 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"uuid"
+
 	"github.com/banshee-lab/pgkeeper/internal/domain"
+	"github.com/banshee-lab/pgkeeper/internal/events"
+	"github.com/banshee-lab/pgkeeper/internal/logstore"
 	"github.com/banshee-lab/pgkeeper/internal/restic"
 )
 
@@ -24,25 +29,30 @@ var ErrShuttingDown = errors.New("maintenance is shutting down")
 type Source func() ([]domain.BackupConfig, domain.MaintenanceConfig)
 
 type Deps struct {
-	Source   Source
-	Restic   domain.ResticMaintainer
-	Locker   domain.RepoLocker // shared with the backup runner
-	Notifier domain.Notifier
-	Logger   *slog.Logger
-	Clock    func() time.Time // default time.Now
+	Source     Source
+	Restic     domain.ResticMaintainer
+	Locker     domain.RepoLocker // shared with the backup runner
+	Notifier   domain.Notifier
+	Logger     *slog.Logger
+	Clock      func() time.Time // default time.Now
+	Activities domain.RepositoryActivityStore
+	TempPath   string
+	LogHub     *events.Hub[logstore.LogLine]
 }
 
 type Runner struct {
 	Deps
-	mu       sync.Mutex // guards running and stopping
-	running  map[domain.MaintenanceKind]bool
-	stopping bool
-	wg       sync.WaitGroup
-	ctx      context.Context
-	cancel   context.CancelFunc
+	mu          sync.Mutex // guards running and stopping
+	running     map[domain.MaintenanceKind]bool
+	repoRunning map[string]bool
+	stopping    bool
+	wg          sync.WaitGroup
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 var _ domain.MaintenanceRunner = (*Runner)(nil)
+var _ domain.RepositoryMaintenanceRunner = (*Runner)(nil)
 
 func New(d Deps) *Runner {
 	if d.Logger == nil {
@@ -54,8 +64,11 @@ func New(d Deps) *Runner {
 	if d.Notifier == nil {
 		d.Notifier = noNotify{}
 	}
+	if d.LogHub == nil {
+		d.LogHub = events.NewHub[logstore.LogLine]()
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Runner{Deps: d, running: map[domain.MaintenanceKind]bool{}, ctx: ctx, cancel: cancel}
+	return &Runner{Deps: d, running: map[domain.MaintenanceKind]bool{}, repoRunning: map[string]bool{}, ctx: ctx, cancel: cancel}
 }
 
 type noNotify struct{}
@@ -130,11 +143,219 @@ func (r *Runner) Run(ctx context.Context, kind domain.MaintenanceKind) error {
 			errs = append(errs, fmt.Errorf("interrupted: %w", ctx.Err()))
 			break
 		}
-		if err := r.runRepo(ctx, kind, repo, mc); err != nil {
+		var err error
+		if r.Activities == nil {
+			err = r.runRepo(ctx, kind, repo, mc)
+		} else {
+			err = r.runRepositoryActivity(ctx, kind, repo, mc, domain.TriggerSchedule, nil, nil)
+		}
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", restic.RedactRepo(repo.Repository), err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (r *Runner) TriggerRepository(id string, kind domain.MaintenanceKind) (*domain.RepositoryActivity, error) {
+	if kind != domain.MaintenancePrune && kind != domain.MaintenanceCheck && kind != domain.MaintenanceUnlock {
+		return nil, fmt.Errorf("unsupported repository activity %q", kind)
+	}
+	backups, mc := r.Source()
+	var selected *domain.ResticConfig
+	for _, repo := range Repos(mc, backups) {
+		if domain.RepositoryID(repo.Repository) == id {
+			repoCopy := repo
+			selected = &repoCopy
+			break
+		}
+	}
+	if selected == nil {
+		return nil, domain.ErrRepoMissing
+	}
+	if r.Activities == nil {
+		return nil, errors.New("repository activity store unavailable")
+	}
+	var reservedRelease func()
+	if kind == domain.MaintenanceUnlock {
+		locker, ok := r.Locker.(interface {
+			TryAcquireRepo(string, string) (func(), bool)
+		})
+		if !ok {
+			return nil, errors.New("repository unlock requires a try-lock capable repository gate")
+		}
+		var acquired bool
+		reservedRelease, acquired = locker.TryAcquireRepo(selected.Repository, "maintenance:unlock")
+		if !acquired {
+			return nil, domain.ErrMaintenanceRunning
+		}
+	}
+	r.mu.Lock()
+	if r.stopping {
+		r.mu.Unlock()
+		if reservedRelease != nil {
+			reservedRelease()
+		}
+		return nil, ErrShuttingDown
+	}
+	if r.repoRunning[id] {
+		r.mu.Unlock()
+		if reservedRelease != nil {
+			reservedRelease()
+		}
+		return nil, domain.ErrMaintenanceRunning
+	}
+	r.repoRunning[id] = true
+	r.wg.Add(1)
+	r.mu.Unlock()
+
+	now := r.Clock().UTC()
+	act := &domain.RepositoryActivity{
+		ID: uuid.NewV7().String(), RepositoryID: id, Kind: kind,
+		TriggeredBy: domain.TriggerManual, Status: domain.StatusRunning,
+		StartedAt: now, LogPath: filepath.Join(r.TempPath, "pgkeeper", "repository-activities", id+"-"+uuid.NewV7().String()+".log"),
+	}
+	if err := r.Activities.CreateRepositoryActivity(context.Background(), act); err != nil {
+		r.mu.Lock()
+		delete(r.repoRunning, id)
+		r.mu.Unlock()
+		if reservedRelease != nil {
+			reservedRelease()
+		}
+		r.wg.Done()
+		return nil, err
+	}
+	result := *act
+	go func() {
+		defer r.wg.Done()
+		defer func() {
+			r.mu.Lock()
+			delete(r.repoRunning, id)
+			r.mu.Unlock()
+		}()
+		if err := r.runRepositoryActivity(r.ctx, kind, *selected, mc, domain.TriggerManual, act, reservedRelease); err != nil {
+			r.Logger.Error("repository maintenance failed", "repository", id, "kind", kind, "err", err)
+		}
+	}()
+	return &result, nil
+}
+
+func (r *Runner) RepositoryRunning(id string) bool {
+	if runner, ok := r.Locker.(interface{ Running() []domain.Job }); ok {
+		backups, _ := r.Source()
+		repositories := make(map[string]string, len(backups))
+		for _, backup := range backups {
+			repositories[backup.Name] = domain.RepositoryID(backup.Restic.Repository)
+		}
+		for _, job := range runner.Running() {
+			if repositories[job.BackupName] == id {
+				return true
+			}
+		}
+	}
+	if r.Activities != nil {
+		items, err := r.Activities.CurrentRepositoryActivities(context.Background(), id)
+		if err == nil && len(items) > 0 {
+			return true
+		}
+		if err != nil {
+			return true
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.repoRunning[id]
+}
+
+func (r *Runner) runRepositoryActivity(ctx context.Context, kind domain.MaintenanceKind, repo domain.ResticConfig, mc domain.MaintenanceConfig, trigger domain.Trigger, act *domain.RepositoryActivity, reservedRelease func()) error {
+	if act == nil {
+		id := domain.RepositoryID(repo.Repository)
+		now := r.Clock().UTC()
+		act = &domain.RepositoryActivity{ID: uuid.NewV7().String(), RepositoryID: id, Kind: kind, TriggeredBy: trigger, Status: domain.StatusRunning, StartedAt: now, LogPath: filepath.Join(r.TempPath, "pgkeeper", "repository-activities", id+"-"+uuid.NewV7().String()+".log")}
+		if r.Activities != nil {
+			if err := r.Activities.CreateRepositoryActivity(context.Background(), act); err != nil {
+				return err
+			}
+		}
+	}
+	logID, err := uuid.Parse(act.ID)
+	if err != nil {
+		if reservedRelease != nil {
+			reservedRelease()
+		}
+		return err
+	}
+	logw, err := logstore.Open(act.LogPath, logID, r.LogHub)
+	if err != nil {
+		if reservedRelease != nil {
+			reservedRelease()
+		}
+		finished := r.Clock().UTC()
+		act.Status, act.FinishedAt, act.Error = domain.StatusError, &finished, err.Error()
+		if r.Activities != nil {
+			_ = r.Activities.FinishRepositoryActivity(context.Background(), act.ID, act.Status, finished, act.Error)
+		}
+		return err
+	}
+	logw.Logf("INFO", "%s started", kind)
+	release := reservedRelease
+	if release == nil {
+		release, err = r.Locker.AcquireRepo(ctx, repo.Repository, "maintenance:"+string(kind), func(holder string, ahead int) {
+			logw.Logf("INFO", "repository busy by %q; waiting (%d ahead)", holder, ahead)
+		})
+	}
+	if err == nil {
+		defer release()
+		switch kind {
+		case domain.MaintenancePrune:
+			err = r.Restic.Prune(ctx, repo, logw)
+		case domain.MaintenanceCheck:
+			err = r.Restic.CheckData(ctx, repo, mc.ReadPercent(), logw)
+		case domain.MaintenanceUnlock:
+			err = r.Restic.Unlock(ctx, repo, logw)
+		}
+		release()
+	}
+	if errors.Is(err, domain.ErrRepoMissing) {
+		logw.Logf("WARN", "%s skipped: repository does not exist yet", kind)
+		err = nil
+	}
+	status := domain.StatusSuccess
+	message := ""
+	if err != nil {
+		status, message = domain.StatusError, err.Error()
+		logw.Logf("ERROR", "%s failed: %v", kind, err)
+	} else {
+		logw.Logf("INFO", "%s finished", kind)
+	}
+	_ = logw.Close()
+	finished := r.Clock().UTC()
+	act.Status, act.FinishedAt, act.Error = status, &finished, message
+	if r.Activities != nil {
+		if finishErr := r.Activities.FinishRepositoryActivity(context.Background(), act.ID, status, finished, message); finishErr != nil {
+			return errors.Join(err, finishErr)
+		}
+	}
+	if err != nil && ctx.Err() == nil {
+		lines, readErr := logstore.ReadLines(act.LogPath, 0)
+		if readErr == nil && len(lines) > 15 {
+			lines = lines[len(lines)-15:]
+		}
+		var tail []string
+		for _, line := range lines {
+			tail = append(tail, line.Text)
+		}
+		nctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if notifyErr := r.Notifier.NotifyFailure(nctx, domain.NotifyEvent{
+			Title:    "Restic " + string(kind),
+			Backup:   domain.BackupConfig{Name: restic.RedactRepo(repo.Repository)},
+			Activity: domain.Activity{StartedAt: act.StartedAt, FinishedAt: &finished, Error: message},
+			LogTail:  strings.Join(tail, "\n"),
+		}); notifyErr != nil {
+			r.Logger.Warn("notify repository maintenance failure", "task", kind, "repository", restic.RedactRepo(repo.Repository), "err", notifyErr)
+		}
+	}
+	return err
 }
 
 func (r *Runner) runRepo(ctx context.Context, kind domain.MaintenanceKind, repo domain.ResticConfig, mc domain.MaintenanceConfig) error {

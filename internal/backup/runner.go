@@ -64,6 +64,10 @@ func (r *Runner) AcquireRepo(ctx context.Context, repo, owner string, onWait fun
 	return r.gate.acquire(ctx, repo, owner, onWait)
 }
 
+func (r *Runner) TryAcquireRepo(repo, owner string) (func(), bool) {
+	return r.gate.tryAcquire(repo, owner)
+}
+
 func NewRunner(d Deps) *Runner {
 	if d.Logger == nil {
 		d.Logger = slog.Default()

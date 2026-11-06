@@ -85,3 +85,54 @@ export interface ActivityList {
 export interface BackupList {
 	items: Backup[];
 }
+
+export interface Repository {
+	id: string;
+	name: string;
+	is_main: boolean;
+	backups: string[];
+	next_prune: string | null;
+	next_check: string | null;
+	total_size?: number;
+	snapshot_count?: number;
+}
+
+export interface RepositoryActivity {
+	id: string;
+	kind: string;
+	triggered_by: Trigger;
+	status: ActivityStatus;
+	started_at: string;
+	finished_at: string | null;
+	error: string | null;
+}
+
+export interface RepositorySnapshot {
+	id: string;
+	short_id: string;
+	parent?: string;
+	time: string;
+	hostname: string;
+	paths: string[];
+	tags: string[];
+	summary?: {
+		files_new: number;
+		files_changed: number;
+		data_added: number;
+	};
+}
+
+export interface RepositorySnapshotStats {
+	available: boolean;
+	files_added: number;
+	files_changed: number;
+	bytes_added: number;
+}
+
+export interface RepositoryNode {
+	path: string;
+	name: string;
+	type: string;
+	size?: number;
+	mtime?: string;
+}

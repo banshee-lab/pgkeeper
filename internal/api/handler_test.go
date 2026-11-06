@@ -153,12 +153,15 @@ func (c fakeCatalog) Get(name string) (domain.BackupConfig, bool) {
 
 type fakeSched struct{}
 
-func (fakeSched) Start() error                { return nil }
-func (fakeSched) Stop(context.Context) error  { return nil }
+func (fakeSched) Start() error               { return nil }
+func (fakeSched) Stop(context.Context) error { return nil }
 func (fakeSched) NextRun(name string) (time.Time, bool) {
 	if name == "alpha" {
 		return time.Date(2026, 11, 3, 3, 0, 0, 0, time.UTC), true
 	}
+	return time.Time{}, false
+}
+func (fakeSched) NextMaintenance(domain.MaintenanceKind) (time.Time, bool) {
 	return time.Time{}, false
 }
 
@@ -361,11 +364,11 @@ func TestLimitClamping(t *testing.T) {
 
 func TestRunBackup(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		err          error
-		ctype, body  string
-		wantStatus   int
-		wantCode     string
+		name        string
+		err         error
+		ctype, body string
+		wantStatus  int
+		wantCode    string
 	}{
 		{"ok no body", nil, "", "", 202, ""},
 		{"ok json body ignored", nil, "application/json", `{"x":1}`, 202, ""},

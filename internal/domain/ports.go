@@ -10,8 +10,8 @@ import (
 
 // ActivityFilter controls ListFiltered.
 type ActivityFilter struct {
-	BackupName string   // empty = all backups
-	Status     Status   // empty = all statuses
+	BackupName string    // empty = all backups
+	Status     Status    // empty = all statuses
 	Since      time.Time // zero = no lower bound; started_at >= Since
 	Cursor     string    // opaque (started_at DESC, id); empty = from newest
 	Limit      int       // 1–100, already clamped by the handler
@@ -48,13 +48,17 @@ type SnapshotRepository interface {
 }
 
 type DumpKind string
-const (DumpDatabase DumpKind = "database"; DumpRoles DumpKind = "roles")
+
+const (
+	DumpDatabase DumpKind = "database"
+	DumpRoles    DumpKind = "roles"
+)
 
 type DumpSpec struct {
-	Kind                       DumpKind
-	Container, Database        string
-	Host, Username             string
-	Port                       int
+	Kind                DumpKind
+	Container, Database string
+	Host, Username      string
+	Port                int
 }
 
 type Executor interface {
@@ -90,6 +94,7 @@ type Scheduler interface {
 	Start() error
 	Stop(ctx context.Context) error
 	NextRun(name string) (time.Time, bool)
+	NextMaintenance(kind MaintenanceKind) (time.Time, bool)
 }
 
 type BackupCatalog interface {

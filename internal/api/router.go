@@ -68,6 +68,16 @@ func NewRouter(h *Handler) http.Handler {
 			r.Get("/api/v1/backups", h.ListBackups)
 			r.Get("/api/v1/backups/{name}", h.GetBackup)
 			r.Get("/api/v1/backups/{name}/activities", h.ListBackupActivities)
+			r.Get("/api/v1/repositories", h.ListRepositories)
+			r.Get("/api/v1/repositories/{id}", h.GetRepository)
+			r.Get("/api/v1/repositories/{id}/activities", h.ListRepositoryActivities)
+			r.With(requireSameOrigin).Post("/api/v1/repositories/{id}/activities", h.RunRepositoryActivity)
+			r.Get("/api/v1/repositories/{id}/activities/{activity}/log", h.RepositoryActivityLog)
+			r.With(requireSameOrigin).Post("/api/v1/repositories/{id}/unlock", h.ForceRepositoryUnlock)
+			r.Get("/api/v1/repositories/{id}/snapshots", h.RepositorySnapshots)
+			r.Get("/api/v1/repositories/{id}/snapshots/{snapshot}/summary", h.RepositorySnapshotStats)
+			r.Get("/api/v1/repositories/{id}/snapshots/{snapshot}/tree", h.RepositoryTree)
+			r.Get("/api/v1/repositories/{id}/snapshots/{snapshot}/download", h.DownloadSnapshotFile)
 			// R-12: run mutates state (starts a job); require same-origin.
 			r.With(requireSameOrigin).Post("/api/v1/backups/{name}/run", h.RunBackup)
 			r.Get("/api/v1/activities", h.ListActivities)
@@ -79,6 +89,7 @@ func NewRouter(h *Handler) http.Handler {
 		// SSE: outside the Timeout group, no compression middleware anywhere.
 		r.Get("/api/v1/activities/{id}/log/stream", h.StreamActivityLog)
 		r.Get("/api/v1/jobs/stream", h.StreamJobs)
+		r.Get("/api/v1/repositories/{id}/activities/{activity}/log/stream", h.StreamRepositoryActivityLog)
 	})
 
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) {

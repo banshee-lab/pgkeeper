@@ -406,6 +406,7 @@ func TestPruneAndCheckData(t *testing.T) {
 	if err := f.cli.Prune(context.Background(), testCfg(), io.Discard); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := f.cli.CheckData(context.Background(), testCfg(), 80, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -415,6 +416,145 @@ func TestPruneAndCheckData(t *testing.T) {
 	}
 	if err := f.cli.CheckData(context.Background(), testCfg(), 0, io.Discard); err == nil {
 		t.Fatal("0% must be rejected")
+	}
+}
+
+func TestSnapshotPathValidation(t *testing.T) {
+	for _, path := range []string{"/var/lib/postgres", "var/lib/postgres", "folder/file"} {
+		if !validSnapshotPath(path) {
+			t.Errorf("validSnapshotPath(%q) = false", path)
+		}
+	}
+	for _, path := range []string{"../secret", "/var/../secret", "-option", "dir/../secret"} {
+		if validSnapshotPath(path) {
+			t.Errorf("validSnapshotPath(%q) = true", path)
+		}
+	}
+}
+
+func TestRepositoryTreeReturnsDirectoryChildren(t *testing.T) {
+	tests := []struct {
+		name        string
+		path        string
+		output      string
+		wantNames   []string
+		wantCommand string
+	}{
+		{
+			name: "root",
+			output: `{"message_type":"node","path":"/var","name":"var","type":"dir"}
+{"message_type":"node","path":"/var/lib","name":"lib","type":"dir"}
+{"message_type":"node","path":"/etc","name":"etc","type":"dir"}`,
+			wantNames:   []string{"var", "etc"},
+			wantCommand: "ls --json abcdef12",
+		},
+		{
+			name: "nested directory",
+			path: "/var",
+			output: `{"message_type":"node","path":"/var","name":"var","type":"dir"}
+{"message_type":"node","path":"/var/lib","name":"lib","type":"dir"}
+{"message_type":"node","path":"/var/lib/postgres","name":"postgres","type":"dir"}`,
+			wantNames:   []string{"lib"},
+			wantCommand: "ls --json abcdef12 /var",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFake(t)
+			f.set("ls", "out", tt.output)
+			got, err := f.cli.RepositoryTree(context.Background(), testCfg(), "abcdef12", tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != len(tt.wantNames) {
+				t.Fatalf("got %d nodes, want %d: %+v", len(got), len(tt.wantNames), got)
+			}
+			for i, want := range tt.wantNames {
+				if got[i].Name != want {
+					t.Errorf("node %d name = %q, want %q", i, got[i].Name, want)
+				}
+			}
+			if calls := f.calls(); len(calls) != 1 || calls[0] != tt.wantCommand {
+				t.Fatalf("calls = %q, want [%q]", calls, tt.wantCommand)
+			}
+		})
+	}
+}
+
+func TestRepositoryTreeReturnsNotFoundForMissingSnapshotObject(t *testing.T) {
+	f := newFake(t)
+	f.set("ls", "exit", "1")
+	f.set("ls", "err", `{"message_type":"exit_error","code":1,"message":"failed to load snapshot abcdef12: open /repo/snapshots/abcdef12: no such file or directory"}`)
+
+	_, err := f.cli.RepositoryTree(context.Background(), testCfg(), "abcdef12", "")
+	if !errors.Is(err, ErrSnapshotNotFound) {
+		t.Fatalf("RepositoryTree error = %v, want ErrSnapshotNotFound", err)
+	}
+}
+
+func TestRepositorySnapshotStatsUsesResticDiff(t *testing.T) {
+	const (
+		parentID   = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		snapshotID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	)
+	f := newFake(t)
+	f.set("snapshots", "out", fmt.Sprintf(`[{"id":%q,"parent":%q}]`, snapshotID, parentID))
+	f.set("diff", "out", fmt.Sprintf(
+		"{\"message_type\":\"change\",\"path\":\"/backup.sql\",\"modifier\":\"M\"}\n"+
+			"{\"message_type\":\"statistics\",\"source_snapshot\":%q,\"target_snapshot\":%q,\"changed_files\":2,\"added\":{\"files\":1,\"bytes\":2048}}\n",
+		parentID, snapshotID))
+
+	got, err := f.cli.RepositorySnapshotStats(context.Background(), testCfg(), snapshotID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Available || got.FilesAdded != 1 || got.FilesChanged != 2 || got.BytesAdded != 2048 {
+		t.Fatalf("snapshot stats = %+v", got)
+	}
+	want := []string{"snapshots --json", "diff --json " + parentID + " " + snapshotID}
+	if calls := f.calls(); !slices.Equal(calls, want) {
+		t.Fatalf("calls = %q, want %q", calls, want)
+	}
+}
+
+func TestRepositorySnapshotStatsWithoutParentIsUnavailable(t *testing.T) {
+	const snapshotID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	f := newFake(t)
+	f.set("snapshots", "out", fmt.Sprintf(`[{"id":%q}]`, snapshotID))
+
+	got, err := f.cli.RepositorySnapshotStats(context.Background(), testCfg(), snapshotID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Available {
+		t.Fatalf("snapshot stats = %+v, want unavailable", got)
+	}
+	if calls := f.calls(); !slices.Equal(calls, []string{"snapshots --json"}) {
+		t.Fatalf("calls = %q, want only snapshots query", calls)
+	}
+}
+
+func TestRepositorySnapshotsDecodesEmbeddedSummary(t *testing.T) {
+	const snapshotID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	f := newFake(t)
+	f.set("snapshots", "out", fmt.Sprintf(
+		`[{"id":%q,"short_id":"bbbbbbbb","summary":{"files_new":2,"files_changed":3,"data_added":4096}}]`,
+		snapshotID,
+	))
+
+	snapshots, err := f.cli.RepositorySnapshots(context.Background(), testCfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshots) != 1 || snapshots[0].Summary == nil {
+		t.Fatalf("snapshots = %+v, want one snapshot summary", snapshots)
+	}
+	if snapshots[0].ShortID != "bbbbbbbb" {
+		t.Fatalf("snapshot short ID = %q, want %q", snapshots[0].ShortID, "bbbbbbbb")
+	}
+	summary := snapshots[0].Summary
+	if summary.FilesNew != 2 || summary.FilesChanged != 3 || summary.DataAdded != 4096 {
+		t.Fatalf("snapshot summary = %+v", summary)
 	}
 }
 

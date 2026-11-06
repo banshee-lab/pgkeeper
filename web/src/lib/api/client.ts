@@ -1,4 +1,16 @@
-import type { Activity, ActivityList, ApiErrorBody, Backup, BackupList, Me } from './types';
+import type {
+	Activity,
+	ActivityList,
+	ApiErrorBody,
+	Backup,
+	BackupList,
+	Me,
+	Repository,
+	RepositoryActivity,
+	RepositoryNode,
+	RepositorySnapshot,
+	RepositorySnapshotStats
+} from './types';
 import {
 	copyMockActivities,
 	copyMockBackups,
@@ -222,4 +234,54 @@ export async function runBackup(name: string): Promise<Activity> {
 export function logoutRequest(): Promise<void> {
 	if (mockEnabled) return Promise.resolve();
 	return request<void>('/auth/logout', { method: 'POST' });
+}
+
+export async function listRepositories(): Promise<Repository[]> {
+	if (mockEnabled) return [];
+	const result = await request<{ items: Repository[] }>('/api/v1/repositories');
+	return result.items;
+}
+
+export function getRepository(id: string): Promise<Repository> {
+	return request<Repository>(`/api/v1/repositories/${encodeURIComponent(id)}`);
+}
+
+export async function listRepositoryActivities(id: string): Promise<RepositoryActivity[]> {
+	const result = await request<{ items: RepositoryActivity[] }>(`/api/v1/repositories/${encodeURIComponent(id)}/activities`);
+	return result.items;
+}
+
+export async function listRepositorySnapshots(id: string): Promise<RepositorySnapshot[]> {
+	const result = await request<{ items: RepositorySnapshot[] }>(`/api/v1/repositories/${encodeURIComponent(id)}/snapshots`);
+	return result.items;
+}
+
+export function getRepositorySnapshotStats(id: string, snapshot: string): Promise<RepositorySnapshotStats> {
+	return request<RepositorySnapshotStats>(`/api/v1/repositories/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(snapshot)}/summary`);
+}
+
+export async function listSnapshotTree(
+	id: string,
+	snapshot: string,
+	path = '',
+	signal?: AbortSignal
+): Promise<RepositoryNode[]> {
+	const query = path ? `?path=${encodeURIComponent(path)}` : '';
+	const result = await request<{ items: RepositoryNode[] }>(
+		`/api/v1/repositories/${encodeURIComponent(id)}/snapshots/${encodeURIComponent(snapshot)}/tree${query}`,
+		{ signal }
+	);
+	return result.items;
+}
+
+export function startRepositoryActivity(id: string, kind: 'prune' | 'check'): Promise<RepositoryActivity> {
+	return request<RepositoryActivity>(`/api/v1/repositories/${encodeURIComponent(id)}/activities`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ kind })
+	});
+}
+
+export function forceRepositoryUnlock(id: string): Promise<RepositoryActivity> {
+	return request<RepositoryActivity>(`/api/v1/repositories/${encodeURIComponent(id)}/unlock`, { method: 'POST' });
 }
