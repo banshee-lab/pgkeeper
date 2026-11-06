@@ -1,8 +1,8 @@
-import { jobs } from '$lib/stores/jobs.svelte';
-import { activities } from '$lib/stores/activities.svelte';
-import { backups } from '$lib/stores/backups.svelte';
-import { session } from '$lib/stores/session.svelte';
-import type { Activity, Job } from '$lib/api/types';
+import { jobs } from '#lib/stores/jobs.svelte';
+import { activities } from '#lib/stores/activities.svelte';
+import { backups } from '#lib/stores/backups.svelte';
+import { session } from '#lib/stores/session.svelte';
+import type { Activity, Job } from '#lib/api/types';
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
 export type JobsEventType = 'snapshot' | 'job.started' | 'job.phase' | 'job.finished';

@@ -1,15 +1,15 @@
 <script lang="ts">
 	import { Button, Heading } from '@runwisp/ui';
 	import { toast } from '@runwisp/ui';
-	import AttentionPanel from '$lib/components/AttentionPanel.svelte';
-	import RecentPanel from '$lib/components/RecentPanel.svelte';
-	import RunningPanel from '$lib/components/RunningPanel.svelte';
-	import StatTile from '$lib/components/StatTile.svelte';
-	import { deriveDashboard } from '$lib/dashboard';
-	import { relativeShort } from '$lib/format';
-	import { activities } from '$lib/stores/activities.svelte';
-	import { backups } from '$lib/stores/backups.svelte';
-	import { clock } from '$lib/stores/clock.svelte';
+	import AttentionPanel from '#lib/components/AttentionPanel.svelte';
+	import RecentPanel from '#lib/components/RecentPanel.svelte';
+	import RunningPanel from '#lib/components/RunningPanel.svelte';
+	import StatTile from '#lib/components/StatTile.svelte';
+	import { deriveDashboard } from '#lib/dashboard';
+	import { relativeShort } from '#lib/format';
+	import { activities } from '#lib/stores/activities.svelte';
+	import { backups } from '#lib/stores/backups.svelte';
+	import { clock } from '#lib/stores/clock.svelte';
 
 	let refreshing = $state(false);
 	const summary = $derived(deriveDashboard(backups.list));

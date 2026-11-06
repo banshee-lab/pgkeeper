@@ -1,4 +1,4 @@
-import { serverNow } from '$lib/api/client';
+import { serverNow } from '#lib/api/client';
 
 let now = $state(serverNow());
 let timer: ReturnType<typeof setInterval> | undefined;

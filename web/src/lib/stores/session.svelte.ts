@@ -1,5 +1,5 @@
-import { ApiError, getMe, logoutRequest, setUnauthorizedHandler } from '$lib/api/client';
-import type { Me } from '$lib/api/types';
+import { ApiError, getMe, logoutRequest, setUnauthorizedHandler } from '#lib/api/client';
+import type { Me } from '#lib/api/types';
 import { activities } from './activities.svelte';
 import { backups } from './backups.svelte';
 import { jobs } from './jobs.svelte';

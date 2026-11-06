@@ -1,5 +1,5 @@
-import { getBackup, listBackups } from '$lib/api/client';
-import type { Backup } from '$lib/api/types';
+import { getBackup, listBackups } from '#lib/api/client';
+import type { Backup } from '#lib/api/types';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 

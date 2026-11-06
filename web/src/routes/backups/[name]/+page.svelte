@@ -2,16 +2,16 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { Button, Heading } from '@runwisp/ui';
-	import { ApiError, getActivity, getActivityLog } from '$lib/api/client';
-	import ActivityList from '$lib/components/ActivityList.svelte';
-	import DetailsPanel from '$lib/components/DetailsPanel.svelte';
-	import OutputPanel from '$lib/components/OutputPanel.svelte';
-	import RunButton from '$lib/components/RunButton.svelte';
-	import { stripAnsi } from '$lib/format';
-	import type { Activity } from '$lib/api/types';
-	import { activities } from '$lib/stores/activities.svelte';
-	import { backups } from '$lib/stores/backups.svelte';
-	import { logStream } from '$lib/stores/log-stream.svelte';
+	import { ApiError, getActivity, getActivityLog } from '#lib/api/client';
+	import ActivityList from '#lib/components/ActivityList.svelte';
+	import DetailsPanel from '#lib/components/DetailsPanel.svelte';
+	import OutputPanel from '#lib/components/OutputPanel.svelte';
+	import RunButton from '#lib/components/RunButton.svelte';
+	import { stripAnsi } from '#lib/format';
+	import type { Activity } from '#lib/api/types';
+	import { activities } from '#lib/stores/activities.svelte';
+	import { backups } from '#lib/stores/backups.svelte';
+	import { logStream } from '#lib/stores/log-stream.svelte';
 
 	const name = $derived(page.params.name ?? '');
 	const backup = $derived(backups.list.find((candidate) => candidate.name === name) ?? null);

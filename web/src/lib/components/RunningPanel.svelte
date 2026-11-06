@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { Heading } from '@runwisp/ui';
-	import type { Backup } from '$lib/api/types';
-	import { activityHref, projectHref } from '$lib/dashboard';
-	import { formatDuration, relativeShort, triggerLabel } from '$lib/format';
-	import { jobs } from '$lib/stores/jobs.svelte';
+	import type { Backup } from '#lib/api/types';
+	import { activityHref, projectHref } from '#lib/dashboard';
+	import { formatDuration, relativeShort, triggerLabel } from '#lib/format';
+	import { jobs } from '#lib/stores/jobs.svelte';
 
 	let { items, now }: { items: Backup[]; now: number } = $props();
 </script>

@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Heading } from '@runwisp/ui';
-	import type { Backup } from '$lib/api/types';
-	import { cronText, formatBytes, formatDateTime, redactUrl, relativeShort } from '$lib/format';
-	import { backups } from '$lib/stores/backups.svelte';
+	import type { Backup } from '#lib/api/types';
+	import { cronText, formatBytes, formatDateTime, redactUrl, relativeShort } from '#lib/format';
+	import { backups } from '#lib/stores/backups.svelte';
 	import NextRun from './NextRun.svelte';
 	import StatusBullet from './StatusBullet.svelte';
 

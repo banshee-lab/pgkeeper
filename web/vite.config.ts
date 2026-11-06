@@ -15,7 +15,6 @@ export default defineConfig(({ mode }) => {
 			tailwindcss(),
 			sveltekit({
 				adapter: adapter({ fallback: 'index.html', strict: false }),
-				alias: { '$lib': './src/lib' },
 				compilerOptions: {
 					runes: ({ filename }) =>
 						filename.split(/[/\\]/).includes('node_modules') ? undefined : true

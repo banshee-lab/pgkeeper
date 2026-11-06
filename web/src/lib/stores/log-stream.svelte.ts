@@ -1,5 +1,5 @@
-import { getActivityLog } from '$lib/api/client';
-import { stripAnsi } from '$lib/format';
+import { getActivityLog } from '#lib/api/client';
+import { stripAnsi } from '#lib/format';
 
 export type LogStreamState = 'idle' | 'connecting' | 'live' | 'ended' | 'failed';
 

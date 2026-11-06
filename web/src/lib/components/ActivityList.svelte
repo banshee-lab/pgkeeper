@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Heading } from '@runwisp/ui';
-	import type { Activity } from '$lib/api/types';
-	import { formatDateTime, formatDuration, statusLabel, triggerLabel } from '$lib/format';
+	import type { Activity } from '#lib/api/types';
+	import { formatDateTime, formatDuration, statusLabel, triggerLabel } from '#lib/format';
 	import StatusBullet from './StatusBullet.svelte';
 
 	let {

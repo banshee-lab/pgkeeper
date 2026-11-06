@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import BackupNav from './BackupNav.svelte';
 	import ConnectionStatus from './ConnectionStatus.svelte';
-	import { connection } from '$lib/stores/connection.svelte';
+	import { connection } from '#lib/stores/connection.svelte';
 
 	interface Props {
 		open: boolean;

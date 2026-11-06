@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Heading, StatusDot } from '@runwisp/ui';
-	import type { Activity } from '$lib/api/types';
-	import { activityHref } from '$lib/dashboard';
-	import { formatDuration, relativeShort, statusLabel, triggerLabel } from '$lib/format';
+	import type { Activity } from '#lib/api/types';
+	import { activityHref } from '#lib/dashboard';
+	import { formatDuration, relativeShort, statusLabel, triggerLabel } from '#lib/format';
 
 	let { items, now }: { items: Activity[]; now: number } = $props();
 
