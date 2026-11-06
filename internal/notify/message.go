@@ -22,6 +22,11 @@ func formatFailure(e domain.NotifyEvent, loc *time.Location) string {
 	if d := a.Duration(); d != nil {
 		dur = d.Round(time.Second).String()
 	}
+	if e.Title != "" {
+		head := fmt.Sprintf("❌ %s FAILED: %s\nStarted:   %s\nDuration:  %s\nError:     %s",
+			e.Title, e.Backup.Name, a.StartedAt.In(loc).Format(timeLayout), dur, a.Error)
+		return assemble(head, e.LogTail)
+	}
 	head := fmt.Sprintf(
 		"❌ Backup FAILED: %s\nDatabase:  %s (container %s)\nStarted:   %s\nDuration:  %s\nTrigger:   %s\nPhase/Err: %s\nActivity:  %s",
 		e.Backup.Name, a.Database, e.Backup.Container,

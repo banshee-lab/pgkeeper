@@ -70,6 +70,9 @@ type ResticClient interface {
 }
 
 type NotifyEvent struct {
+	// Title, when set, marks a non-backup failure (e.g. "Restic prune"); in
+	// that case Backup.Name carries the subject (the redacted repository).
+	Title    string
 	Backup   BackupConfig
 	Activity Activity
 	LogTail  string

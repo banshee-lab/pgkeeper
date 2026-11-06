@@ -23,6 +23,13 @@ keep-daily   = 7
 keep-weekly  = 4
 keep-monthly = 12
 keep-yearly  = 2
+# Optional global maintenance over every distinct repository (global + backup
+# overrides). Leave the crons unset to disable.
+prune-cron         = "0 4 * * 0"   # weekly restic prune
+check-cron         = "0 3 * * 6"   # weekly restic check
+check-read-percent = 80            # % of data read back (default 80)
+# skip-prune = true                # forget after each backup without pruning;
+                                   # then only prune-cron reclaims space
 
 [backup.main_db]
 cron       = "@daily"

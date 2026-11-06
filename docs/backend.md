@@ -80,8 +80,59 @@ passwords. Restic runs in the pgkeeper process environment and uses
 
 The scheduler timezone is `global.timezone` (system local time by default).
 The resolved IANA timezone name is returned as the `timezone` field in the
-backup list and detail responses. Configuration is loaded only at startup;
-restart the service after changing configuration or its environment.
+backup list and detail responses.
+
+## Scheduled restic maintenance
+
+After every successful snapshot pgkeeper runs `restic forget --prune` for that
+backup's tag and host with the configured `keep-*` retention (skipped when none
+is set). Set `skip-prune = true` in `[restic]`, or in a single `[backup.*]` to
+override it, to forget only: forgetting is fast and just drops snapshot
+references, and the space is then reclaimed only by the scheduled prune below.
+Use it together with `prune-cron` (a warning is logged at startup and on reload
+when `skip-prune` is set without it).
+
+Two optional global tasks are configured in `[restic]` (`prune-cron`,
+`check-cron` and `check-read-percent` are not valid inside `[backup.*]`); an
+empty cron disables the task:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `prune-cron` | unset | When to run `restic prune`. |
+| `check-cron` | unset | When to run `restic check --read-data-subset=N%`. |
+| `skip-prune` | `false` | Skip `--prune` in the forget run after each backup (also valid per backup). |
+| `check-read-percent` | `80` | Share of pack data read back by the check (1-100; 100 uses `--read-data`). |
+
+Both tasks cover every distinct repository: the global `[restic]` repository
+and each per-backup `repository` override. A repository is handled once per
+run however many backups use it (the first definition, and so its password,
+wins), one repository at a time. A repository that does not exist yet is
+skipped; failures are logged and sent through the configured notifier, and one
+failing repository does not stop the others.
+
+Locking: prune and check take the same per-repository queue as the restic
+phase of backups, so they wait for running backups and backups wait for them
+(a backup can therefore stay `queued` for as long as a check runs; schedule
+them off-hours). Across processes restic waits up to 5 minutes for locks held
+elsewhere (`--retry-lock 5m`) and then fails with the "locked by another
+process" error. Stale locks are never removed automatically. A task whose
+previous run is still going is skipped, and shutdown interrupts a running task
+so restic releases its lock.
+
+## Reloading the configuration
+
+Run `pgkeeper -reload` (with the same `-config`/`PGKEEPER_CONFIG`) to make the
+running service re-read its file. The file is validated first; an invalid one
+is reported and nothing is signalled. The command sends `SIGHUP` to the PID in
+`<global.temp_path>/pgkeeper/.pgkeeper.pid` (`kill -HUP <pid>` works too) and
+the daemon logs `config reloaded` or `config reload failed`; on failure the
+running configuration stays active.
+
+A reload applies backups (added, removed, changed) and their cron schedules,
+retention and restic settings, and the maintenance schedules. Runs already in
+progress finish with the settings they started with. Changes to `global.*`
+paths, `listen`, `timezone`, `[telegram]`, `[auth]` and to environment
+variables need a restart; they are reported in the log and ignored.
 
 ## Configuration and persistence
 

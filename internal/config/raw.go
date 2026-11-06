@@ -43,6 +43,12 @@ type rawRestic struct {
 	KeepWeekly  *int    `toml:"keep-weekly"`
 	KeepMonthly *int    `toml:"keep-monthly"`
 	KeepYearly  *int    `toml:"keep-yearly"`
+	SkipPrune   *bool   `toml:"skip-prune"`
+
+	// Global-only maintenance settings (rejected as unknown keys in [backup.*]).
+	PruneCron        *string `toml:"prune-cron"`
+	CheckCron        *string `toml:"check-cron"`
+	CheckReadPercent *int    `toml:"check-read-percent"`
 }
 
 type rawBackup struct {
@@ -62,12 +68,13 @@ type rawBackup struct {
 	KeepWeekly  *int    `toml:"keep-weekly"`
 	KeepMonthly *int    `toml:"keep-monthly"`
 	KeepYearly  *int    `toml:"keep-yearly"`
+	SkipPrune   *bool   `toml:"skip-prune"`
 }
 
 func (b rawBackup) restic() rawRestic {
 	return rawRestic{
 		Repository: b.Repository, Password: b.Password,
 		KeepDaily: b.KeepDaily, KeepWeekly: b.KeepWeekly,
-		KeepMonthly: b.KeepMonthly, KeepYearly: b.KeepYearly,
+		KeepMonthly: b.KeepMonthly, KeepYearly: b.KeepYearly, SkipPrune: b.SkipPrune,
 	}
 }

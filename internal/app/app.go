@@ -17,6 +17,8 @@ import (
 	"github.com/banshee-lab/pgkeeper/internal/events"
 	"github.com/banshee-lab/pgkeeper/internal/executor"
 	"github.com/banshee-lab/pgkeeper/internal/logstore"
+	"github.com/banshee-lab/pgkeeper/internal/maintenance"
+	"github.com/banshee-lab/pgkeeper/internal/reload"
 	"github.com/banshee-lab/pgkeeper/internal/restic"
 	"github.com/banshee-lab/pgkeeper/internal/scheduler"
 	"github.com/banshee-lab/pgkeeper/internal/store"
@@ -24,7 +26,7 @@ import (
 
 // Run wires everything. If runOnce != "" it runs that backup once and returns
 // (nil on success, error otherwise) without starting the scheduler or HTTP server.
-func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log *slog.Logger, runOnce string) error {
+func Run(ctx context.Context, cfg *config.Config, configPath string, notifier domain.Notifier, log *slog.Logger, runOnce string) error {
 	db, err := store.Open(cfg.Global.DBPath)
 	if err != nil {
 		return err
@@ -61,8 +63,11 @@ func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log 
 	jobHub := events.NewHub[events.JobEvent]()
 	logHub := events.NewHub[logstore.LogLine]()
 
+	// holder lets a config reload swap the backup catalog under every consumer.
+	holder := config.NewHolder(cfg)
+
 	runner := backup.NewRunner(backup.Deps{
-		Catalog:    cfg,
+		Catalog:    holder,
 		Global:     cfg.Global,
 		Activities: activities,
 		Snapshots:  snapshots,
@@ -92,19 +97,45 @@ func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log 
 		go authSvc.RunCleanup(ctx, time.Hour, log)
 	}
 
+	// Scheduled restic prune/check over every distinct repository. They share
+	// the runner's per-repository gate, so they queue with backups.
+	maint := maintenance.New(maintenance.Deps{
+		Source: func() ([]domain.BackupConfig, domain.MaintenanceConfig) {
+			c := holder.Current()
+			return c.Backups, c.Maintenance
+		},
+		Restic:   resticCLI,
+		Locker:   runner,
+		Notifier: notifier,
+		Logger:   log,
+	})
+
 	sched, err := scheduler.New(cfg.Global.Location, cfg.Backups, runner, log)
 	if err != nil {
+		return err
+	}
+	sched.SetMaintenance(maint)
+	if err := sched.Reload(cfg.Backups, cfg.Maintenance); err != nil {
 		return err
 	}
 	if err := sched.Start(); err != nil {
 		return err
 	}
 
+	// `pgkeeper -reload` (or `kill -HUP`) re-reads the config file.
+	watchReload(ctx, configPath, holder, sched, log)
+	pidFile := reload.PIDFile(cfg.Global.TempPath)
+	if err := reload.WritePID(pidFile); err != nil {
+		log.Warn("cannot write PID file; `pgkeeper -reload` will not find this process (use kill -HUP)", "path", pidFile, "err", err)
+	} else {
+		defer reload.RemovePID(pidFile)
+	}
+
 	h := api.NewHandler(api.Deps{
 		DB:         db,
 		Activities: activities,
 		Snapshots:  snapshots,
-		Catalog:    cfg,
+		Catalog:    holder,
 		Runner:     runner,
 		Scheduler:  sched,
 		JobHub:     jobHub,
@@ -139,6 +170,9 @@ func Run(ctx context.Context, cfg *config.Config, notifier domain.Notifier, log 
 	defer scancel()
 	if err := sched.Stop(sctx); err != nil {
 		log.Warn("scheduler stop", "err", err)
+	}
+	if err := maint.Shutdown(sctx); err != nil {
+		log.Warn("maintenance shutdown", "err", err)
 	}
 	if err := runner.Shutdown(sctx); err != nil {
 		log.Warn("runner shutdown", "err", err)

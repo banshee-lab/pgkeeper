@@ -116,7 +116,9 @@ func backupArgs(tag, host string, files []string) []string {
 	return append(args, files...)
 }
 
-// forgetArgs returns nil when no retention value is set.
+// forgetArgs returns nil when no retention value is set. It prunes the
+// forgotten data too unless cfg.SkipPrune is set, in which case only the
+// scheduled `restic prune` ([restic].prune-cron) reclaims the space.
 func forgetArgs(cfg domain.ResticConfig, tag, host string) []string {
 	var keep []string
 	add := func(flag string, n int) {
@@ -133,7 +135,27 @@ func forgetArgs(cfg domain.ResticConfig, tag, host string) []string {
 	}
 	args := []string{"forget", "--tag", tag, "--host", host, "--retry-lock", retryLock}
 	args = append(args, keep...)
-	return append(args, "--prune")
+	if !cfg.SkipPrune {
+		args = append(args, "--prune")
+	}
+	return args
+}
+
+// pruneArgs builds `restic prune`. It takes an exclusive repository lock, so
+// it waits (--retry-lock) for other processes instead of failing at once.
+func pruneArgs() []string {
+	return []string{"prune", "--retry-lock", retryLock}
+}
+
+// checkDataArgs builds `restic check` reading readPercent% of the pack data.
+// check only needs a shared lock, but --retry-lock lets it wait for a running
+// prune.
+func checkDataArgs(readPercent int) []string {
+	args := []string{"check", "--retry-lock", retryLock}
+	if readPercent >= 100 {
+		return append(args, "--read-data")
+	}
+	return append(args, "--read-data-subset="+strconv.Itoa(readPercent)+"%")
 }
 
 // ---- logging helpers ---------------------------------------------------------
@@ -330,6 +352,43 @@ func (c *CLI) Forget(ctx context.Context, cfg domain.ResticConfig, tag, host str
 		return fmt.Errorf("forget: %w", err)
 	}
 	return nil
+}
+
+var _ domain.ResticMaintainer = (*CLI)(nil)
+
+// Prune runs `restic prune`. A missing repository yields domain.ErrRepoMissing
+// (nothing is initialised); a lock held by another process is retried for 5
+// minutes and then reported as an ExitError with Locked() == true.
+func (c *CLI) Prune(ctx context.Context, cfg domain.ResticConfig, logw io.Writer) error {
+	if logw == nil {
+		logw = io.Discard
+	}
+	if err := c.run(ctx, cfg, "", pruneArgs(), logw, nil); err != nil {
+		return maintenanceErr("prune", err)
+	}
+	return nil
+}
+
+// CheckData runs `restic check` reading readPercent% (1-100) of the data.
+func (c *CLI) CheckData(ctx context.Context, cfg domain.ResticConfig, readPercent int, logw io.Writer) error {
+	if logw == nil {
+		logw = io.Discard
+	}
+	if readPercent < 1 || readPercent > 100 {
+		return fmt.Errorf("check: read percent must be between 1 and 100 (got %d)", readPercent)
+	}
+	if err := c.run(ctx, cfg, "", checkDataArgs(readPercent), logw, nil); err != nil {
+		return maintenanceErr("check", err)
+	}
+	return nil
+}
+
+func maintenanceErr(op string, err error) error {
+	var ee *ExitError
+	if errors.As(err, &ee) && repoMissing(ee) {
+		return fmt.Errorf("%s: %w", op, domain.ErrRepoMissing)
+	}
+	return fmt.Errorf("%s: %w", op, err)
 }
 
 // CheckVersion runs `restic version`; it errors if restic is missing or older than 0.16.
