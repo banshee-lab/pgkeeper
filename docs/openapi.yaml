@@ -6,7 +6,7 @@ info:
     Scheduler and API for PostgreSQL backups (pg_dump via docker exec → restic).
     When OIDC is configured, /api/v1 routes require the pgkeeper_session cookie.
 
-    POST /auth/logout and POST /api/v1/backups/{name}/run require a matching
+    Mutating session, backup, and repository endpoints require a matching
     Origin or Referer header (same-origin check).
 servers:
   - url: /
@@ -15,6 +15,7 @@ tags:
   - name: auth
   - name: backups
   - name: activities
+  - name: repositories
   - name: jobs
 
 security:
@@ -169,6 +170,202 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/repositories:
+    get:
+      tags: [repositories]
+      summary: List distinct configured restic repositories
+      responses:
+        '200':
+          description: Repository list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Repository' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /api/v1/repositories/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{32}$' } }
+    get:
+      tags: [repositories]
+      summary: Repository details and current restic statistics
+      responses:
+        '200':
+          description: Repository details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Repository' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/repositories/{id}/activities:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{32}$' } }
+    get:
+      tags: [repositories, activities]
+      summary: Repository maintenance history
+      responses:
+        '200':
+          description: Repository activity history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/RepositoryActivity' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [repositories]
+      summary: Start a manual prune or check
+      description: Requires a same-origin request. Rejects another activity running on this repository.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: { type: string, enum: [prune, check] }
+      responses:
+        '202':
+          description: Activity started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RepositoryActivity' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/repositories/{id}/unlock:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{32}$' } }
+    post:
+      tags: [repositories]
+      summary: Force-remove repository locks
+      description: Requires same-origin and an idle pgkeeper repository gate. External restic processes must be stopped first.
+      responses:
+        '202':
+          description: Unlock activity started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RepositoryActivity' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/repositories/{id}/activities/{activity}/log:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: activity, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [repositories, activities]
+      summary: Read repository activity console output
+      responses:
+        '200':
+          description: Log text
+          content:
+            text/plain:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/repositories/{id}/activities/{activity}/log/stream:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: activity, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [repositories, activities]
+      summary: Follow repository activity console output over SSE
+      responses:
+        '200':
+          description: SSE log lines and final status
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/repositories/{id}/snapshots:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{32}$' } }
+    get:
+      tags: [repositories]
+      summary: List repository snapshots
+      responses:
+        '200':
+          description: Snapshot list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/RepositorySnapshot' }
+
+  /api/v1/repositories/{id}/snapshots/{snapshot}/tree:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: snapshot, in: path, required: true, schema: { type: string } }
+      - { name: path, in: query, schema: { type: string } }
+    get:
+      tags: [repositories]
+      summary: Browse files and directories in a snapshot
+      responses:
+        '200':
+          description: Snapshot directory entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/RepositoryNode' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/repositories/{id}/snapshots/{snapshot}/summary:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: snapshot, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [repositories]
+      summary: Get snapshot change statistics
+      description: >
+        Compares the snapshot with its parent using restic diff. Initial
+        snapshots without a parent return available=false.
+      responses:
+        '200':
+          description: Snapshot change statistics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RepositorySnapshotStats' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/repositories/{id}/snapshots/{snapshot}/download:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: snapshot, in: path, required: true, schema: { type: string } }
+      - { name: path, in: query, required: true, schema: { type: string } }
+    get:
+      tags: [repositories]
+      summary: Stream one file from a snapshot
+      responses:
+        '200':
+          description: File content
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/activities:
     get:
@@ -375,6 +572,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Repository is already in use
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     NotFound:
       description: Resource not found
       content:
@@ -398,6 +600,71 @@ components:
     ActivityStatus:
       type: string
       enum: [running, success, error]
+
+    Repository:
+      type: object
+      required: [id, name, is_main, backups, next_prune, next_check]
+      properties:
+        id: { type: string, pattern: '^[0-9a-f]{32}$' }
+        name: { type: string, description: Repository URL credentials are redacted }
+        is_main: { type: boolean, description: 'Whether this is the global [restic] repository' }
+        backups: { type: array, items: { type: string } }
+        next_prune: { type: string, format: date-time, nullable: true }
+        next_check: { type: string, format: date-time, nullable: true }
+        total_size: { type: integer, format: int64 }
+        snapshot_count: { type: integer }
+
+    RepositoryActivity:
+      type: object
+      required: [id, kind, triggered_by, status, started_at, finished_at, error]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [prune, check, unlock] }
+        triggered_by: { $ref: '#/components/schemas/Trigger' }
+        status: { $ref: '#/components/schemas/ActivityStatus' }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        error: { type: string, nullable: true }
+
+    RepositorySnapshot:
+      type: object
+      required: [id, short_id, time, hostname, paths, tags]
+      properties:
+        id: { type: string }
+        short_id: { type: string }
+        parent: { type: string, description: 'Parent snapshot ID; omitted for initial snapshots' }
+        time: { type: string, format: date-time }
+        hostname: { type: string }
+        paths: { type: array, items: { type: string } }
+        tags: { type: array, items: { type: string } }
+        summary: { $ref: '#/components/schemas/ResticSnapshotSummary' }
+
+    ResticSnapshotSummary:
+      type: object
+      required: [files_new, files_changed, data_added]
+      properties:
+        files_new: { type: integer, format: int64 }
+        files_changed: { type: integer, format: int64 }
+        data_added: { type: integer, format: int64 }
+
+    RepositorySnapshotStats:
+      type: object
+      required: [available, files_added, files_changed, bytes_added]
+      properties:
+        available: { type: boolean }
+        files_added: { type: integer, format: int64 }
+        files_changed: { type: integer, format: int64 }
+        bytes_added: { type: integer, format: int64 }
+
+    RepositoryNode:
+      type: object
+      required: [path, name, type]
+      properties:
+        path: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [file, dir, symlink] }
+        size: { type: integer, format: int64 }
+        mtime: { type: string, format: date-time }
 
     Trigger:
       type: string

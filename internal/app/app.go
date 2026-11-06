@@ -37,6 +37,14 @@ func Run(ctx context.Context, cfg *config.Config, configPath string, notifier do
 	}
 
 	activities := store.NewActivityStore(db)
+	repositoryActivities := store.NewRepositoryActivityStore(db)
+	interruptedRepos, err := repositoryActivities.MarkRepositoryActivitiesInterrupted(ctx, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("mark interrupted repository activities: %w", err)
+	}
+	if interruptedRepos > 0 {
+		log.Info("marked interrupted repository activities", "count", interruptedRepos)
+	}
 	snapshots := store.NewSnapshotStore(db)
 	n, err := activities.MarkRunningAsInterrupted(ctx, time.Now().UTC())
 	if err != nil {
@@ -104,10 +112,13 @@ func Run(ctx context.Context, cfg *config.Config, configPath string, notifier do
 			c := holder.Current()
 			return c.Backups, c.Maintenance
 		},
-		Restic:   resticCLI,
-		Locker:   runner,
-		Notifier: notifier,
-		Logger:   log,
+		Restic:     resticCLI,
+		Locker:     runner,
+		Notifier:   notifier,
+		Logger:     log,
+		Activities: repositoryActivities,
+		TempPath:   cfg.Global.TempPath,
+		LogHub:     logHub,
 	})
 
 	sched, err := scheduler.New(cfg.Global.Location, cfg.Backups, runner, log)
@@ -143,6 +154,13 @@ func Run(ctx context.Context, cfg *config.Config, configPath string, notifier do
 		Auth:       authSvc,
 		AppCtx:     ctx,
 		Logger:     log,
+		RepositorySource: func() ([]domain.BackupConfig, domain.MaintenanceConfig) {
+			c := holder.Current()
+			return c.Backups, c.Maintenance
+		},
+		RepositoryInspector:   resticCLI,
+		RepositoryActivities:  repositoryActivities,
+		RepositoryMaintenance: maint,
 	})
 	srv := api.NewServer(cfg.Global.Listen, api.NewRouter(h))
 

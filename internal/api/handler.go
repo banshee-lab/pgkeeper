@@ -25,7 +25,9 @@ import (
 
 const maxLimit = 10
 
-type Pinger interface{ PingContext(ctx context.Context) error }
+type Pinger interface {
+	PingContext(ctx context.Context) error
+}
 
 type Deps struct {
 	DB         Pinger
@@ -43,7 +45,11 @@ type Deps struct {
 	Logger     *slog.Logger
 	// Timezone is the effective IANA timezone name used by the scheduler.
 	// Empty string means local time (reported as "Local" in the API).
-	Timezone string
+	Timezone              string
+	RepositorySource      func() ([]domain.BackupConfig, domain.MaintenanceConfig)
+	RepositoryInspector   domain.RepositoryInspector
+	RepositoryActivities  domain.RepositoryActivityStore
+	RepositoryMaintenance domain.RepositoryMaintenanceRunner
 }
 
 type Handler struct{ Deps }

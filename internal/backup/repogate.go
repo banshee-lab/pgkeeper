@@ -65,6 +65,19 @@ func (g *repoGate) acquire(ctx context.Context, repo, owner string, onWait func(
 	}
 }
 
+func (g *repoGate) tryAcquire(repo, owner string) (func(), bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.repos == nil {
+		g.repos = make(map[string]*gateState)
+	}
+	if _, busy := g.repos[repo]; busy {
+		return nil, false
+	}
+	g.repos[repo] = &gateState{holder: owner}
+	return g.releaser(repo), true
+}
+
 func (g *repoGate) releaser(repo string) func() {
 	var once sync.Once
 	return func() { once.Do(func() { g.release(repo) }) }

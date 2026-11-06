@@ -11,6 +11,12 @@ services:
       timeout: 3s
       retries: 10
 
+  volume-permissions:
+    image: alpine:latest
+    volumes:
+      - repo:/tmp/pgk
+    command: chown -R 1000:467 /tmp/pgk
+
   pgkeeper:
     build:
       context: .
@@ -18,6 +24,8 @@ services:
     depends_on:
       pg-test:
         condition: service_healthy
+      volume-permissions:
+        condition: service_completed_successfully
     user: 1000:467
     ports:
       - "8080:8080"
@@ -25,8 +33,11 @@ services:
       - ./local/pgkeeper.toml:/etc/pgkeeper/pgkeeper.toml:ro
       # Required so pgkeeper can run docker exec against pg-test.
       - /var/run/docker.sock:/var/run/docker.sock
+      - repo:/tmp/pgk
     group_add:
       - "${DOCKER_GID:-998}"
     tmpfs:
-      - /tmp/pgk:rw,uid=1000,gid=467,mode=0750
+      - /var/tmp:rw,uid=1000,gid=467,mode=0750
 
+volumes:
+  repo:

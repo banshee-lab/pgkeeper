@@ -1,18 +1,22 @@
 package restic
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/banshee-lab/pgkeeper/internal/domain"
 )
@@ -22,6 +26,8 @@ import (
 const retryLock = "5m"
 
 var versionRe = regexp.MustCompile(`restic (\d+)\.(\d+)\.(\d+)`)
+var ErrInvalidSnapshotRequest = errors.New("invalid snapshot request")
+var ErrSnapshotNotFound = errors.New("snapshot not found")
 
 // CLI implements domain.ResticClient by running the restic binary (no shell).
 type CLI struct {
@@ -84,6 +90,12 @@ func (e *ExitError) Locked() bool {
 	}
 	t := strings.ToLower(e.tail)
 	return strings.Contains(t, "repository is already locked") || strings.Contains(t, "unable to create lock")
+}
+
+func (e *ExitError) SnapshotMissing() bool {
+	t := strings.ToLower(e.tail)
+	return strings.Contains(t, "failed to load snapshot") &&
+		(strings.Contains(t, "no such file or directory") || strings.Contains(t, "does not exist"))
 }
 
 // ---- per-repository serialisation -------------------------------------------
@@ -162,7 +174,9 @@ func checkDataArgs(readPercent int) []string {
 
 func logLine(w io.Writer, level, format string, args ...any) {
 	text := fmt.Sprintf(format, args...)
-	if l, ok := w.(interface{ Logf(level, format string, args ...any) }); ok {
+	if l, ok := w.(interface {
+		Logf(level, format string, args ...any)
+	}); ok {
 		l.Logf(level, "[restic] %s", text)
 		return
 	}
@@ -355,6 +369,7 @@ func (c *CLI) Forget(ctx context.Context, cfg domain.ResticConfig, tag, host str
 }
 
 var _ domain.ResticMaintainer = (*CLI)(nil)
+var _ domain.RepositoryInspector = (*CLI)(nil)
 
 // Prune runs `restic prune`. A missing repository yields domain.ErrRepoMissing
 // (nothing is initialised); a lock held by another process is retried for 5
@@ -381,6 +396,264 @@ func (c *CLI) CheckData(ctx context.Context, cfg domain.ResticConfig, readPercen
 		return maintenanceErr("check", err)
 	}
 	return nil
+}
+
+func (c *CLI) inspect(ctx context.Context, cfg domain.ResticConfig, args ...string) ([]byte, error) {
+	var out bytes.Buffer
+	if err := c.inspectTo(ctx, cfg, &out, args...); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+func (c *CLI) inspectTo(ctx context.Context, cfg domain.ResticConfig, stdout io.Writer, args ...string) error {
+	unlock, err := c.lock(ctx, cfg.Repository)
+	if err != nil {
+		return fmt.Errorf("waiting for repository lock: %w", err)
+	}
+	defer unlock()
+	cacheDir := c.cacheDir()
+	_ = os.MkdirAll(cacheDir, 0o700)
+	env := buildEnv(cfg, cacheDir, c.environ())
+	red := NewRedactor(secretsFor(cfg, env)...)
+	cmd := exec.CommandContext(ctx, c.bin(), args...)
+	cmd.Env = env
+	cmd.Stdout = stdout
+	var stderr tailBuf
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("restic inspection interrupted: %w", ctx.Err())
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		tail := red.Redact(string(stderr.b))
+		exitErr := &ExitError{Code: ee.ExitCode(), Output: lastLine(tail), tail: tail, Err: ee}
+		if repoMissing(exitErr) {
+			return domain.ErrRepoMissing
+		}
+		return exitErr
+	}
+	return fmt.Errorf("run restic: %w", err)
+}
+
+func (c *CLI) RepositoryStats(ctx context.Context, cfg domain.ResticConfig) (int64, int, error) {
+	out, err := c.inspect(ctx, cfg, "stats", "--json", "--mode", "raw-data")
+	if errors.Is(err, domain.ErrRepoMissing) {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	var stats struct {
+		TotalSize      int64 `json:"total_size"`
+		SnapshotsCount int   `json:"snapshots_count"`
+	}
+	if err := json.Unmarshal(out, &stats); err != nil {
+		return 0, 0, fmt.Errorf("decode restic stats: %w", err)
+	}
+	return stats.TotalSize, stats.SnapshotsCount, nil
+}
+
+func (c *CLI) RepositorySnapshots(ctx context.Context, cfg domain.ResticConfig) ([]domain.RepositorySnapshot, error) {
+	out, err := c.inspect(ctx, cfg, "snapshots", "--json")
+	if errors.Is(err, domain.ErrRepoMissing) {
+		return []domain.RepositorySnapshot{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var snapshots []domain.RepositorySnapshot
+	if err := json.Unmarshal(out, &snapshots); err != nil {
+		return nil, fmt.Errorf("decode restic snapshots: %w", err)
+	}
+	if snapshots == nil {
+		snapshots = []domain.RepositorySnapshot{}
+	}
+	for i := range snapshots {
+		if snapshots[i].Paths == nil {
+			snapshots[i].Paths = []string{}
+		}
+		if snapshots[i].Tags == nil {
+			snapshots[i].Tags = []string{}
+		}
+	}
+	return snapshots, nil
+}
+
+func (c *CLI) RepositorySnapshotStats(ctx context.Context, cfg domain.ResticConfig, snapshotID string) (domain.RepositorySnapshotStats, error) {
+	if !validSnapshotID(snapshotID) {
+		return domain.RepositorySnapshotStats{}, ErrInvalidSnapshotRequest
+	}
+	snapshots, err := c.RepositorySnapshots(ctx, cfg)
+	if err != nil {
+		return domain.RepositorySnapshotStats{}, err
+	}
+	var selected *domain.RepositorySnapshot
+	for i := range snapshots {
+		if snapshots[i].ID == snapshotID {
+			selected = &snapshots[i]
+			break
+		}
+	}
+	if selected == nil {
+		return domain.RepositorySnapshotStats{}, domain.ErrNotFound
+	}
+	if selected.Parent == "" {
+		return domain.RepositorySnapshotStats{}, nil
+	}
+	if !validSnapshotID(selected.Parent) {
+		return domain.RepositorySnapshotStats{}, fmt.Errorf("snapshot %s has an invalid parent ID", snapshotID)
+	}
+
+	output := &diffStatsWriter{source: selected.Parent, target: snapshotID}
+	if err := c.inspectTo(ctx, cfg, output, "diff", "--json", selected.Parent, snapshotID); err != nil {
+		return domain.RepositorySnapshotStats{}, err
+	}
+	if err := output.finish(); err != nil {
+		return domain.RepositorySnapshotStats{}, err
+	}
+	return output.stats, nil
+}
+
+func (c *CLI) RepositoryTree(ctx context.Context, cfg domain.ResticConfig, snapshotID, snapshotPath string) ([]domain.RepositoryNode, error) {
+	if !validSnapshotID(snapshotID) || !validSnapshotPath(snapshotPath) {
+		return nil, ErrInvalidSnapshotRequest
+	}
+	args := []string{"ls", "--json", snapshotID}
+	if snapshotPath != "" && snapshotPath != "." {
+		args = append(args, snapshotPath)
+	}
+	out, err := c.inspect(ctx, cfg, args...)
+	if err != nil {
+		var exitErr *ExitError
+		if errors.As(err, &exitErr) && exitErr.SnapshotMissing() {
+			return nil, ErrSnapshotNotFound
+		}
+		return nil, err
+	}
+	nodes := make([]domain.RepositoryNode, 0)
+	for _, line := range bytes.Split(out, []byte{'\n'}) {
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var row struct {
+			MessageType string    `json:"message_type"`
+			Path        string    `json:"path"`
+			Name        string    `json:"name"`
+			Type        string    `json:"type"`
+			Size        int64     `json:"size"`
+			ModTime     time.Time `json:"mtime"`
+			Node        *struct {
+				Path    string    `json:"path"`
+				Name    string    `json:"name"`
+				Type    string    `json:"type"`
+				Size    int64     `json:"size"`
+				ModTime time.Time `json:"mtime"`
+			} `json:"node"`
+		}
+		if err := json.Unmarshal(line, &row); err != nil {
+			return nil, fmt.Errorf("decode restic tree: %w", err)
+		}
+		if row.Node != nil {
+			nodes = append(nodes, domain.RepositoryNode{
+				Path: row.Node.Path, Name: row.Node.Name, Type: row.Node.Type,
+				Size: row.Node.Size, ModTime: row.Node.ModTime,
+			})
+		} else if row.MessageType == "node" {
+			nodes = append(nodes, domain.RepositoryNode{
+				Path: row.Path, Name: row.Name, Type: row.Type,
+				Size: row.Size, ModTime: row.ModTime,
+			})
+		}
+	}
+	currentPath := pathpkg.Clean(snapshotPath)
+	if currentPath == "." || currentPath == "" {
+		currentPath = "/"
+	}
+	children := nodes[:0]
+	for _, node := range nodes {
+		parent := pathpkg.Dir(pathpkg.Clean(node.Path))
+		if parent == "." || parent == "" {
+			parent = "/"
+		}
+		if parent == currentPath {
+			children = append(children, node)
+		}
+	}
+	return children, nil
+}
+
+func (c *CLI) DownloadSnapshotFile(ctx context.Context, cfg domain.ResticConfig, snapshotID, path string, dst io.Writer) error {
+	if err := ValidateSnapshotFile(snapshotID, path); err != nil {
+		return err
+	}
+	unlock, err := c.lock(ctx, cfg.Repository)
+	if err != nil {
+		return fmt.Errorf("waiting for repository lock: %w", err)
+	}
+	defer unlock()
+	cacheDir := c.cacheDir()
+	_ = os.MkdirAll(cacheDir, 0o700)
+	env := buildEnv(cfg, cacheDir, c.environ())
+	cmd := exec.CommandContext(ctx, c.bin(), "dump", snapshotID, path)
+	cmd.Env = env
+	cmd.Stdout = dst
+	var stderr tailBuf
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("restic dump interrupted: %w", ctx.Err())
+		}
+		red := NewRedactor(secretsFor(cfg, env)...)
+		message := red.Redact(lastLine(string(stderr.b)))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("restic dump failed: %s", message)
+	}
+	return nil
+}
+
+func (c *CLI) Unlock(ctx context.Context, cfg domain.ResticConfig, logw io.Writer) error {
+	if err := c.run(ctx, cfg, "", []string{"unlock", "--remove-all"}, logw, nil); err != nil {
+		return fmt.Errorf("unlock: %w", err)
+	}
+	return nil
+}
+
+func validSnapshotID(id string) bool {
+	if len(id) < 8 || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func ValidateSnapshotFile(snapshotID, path string) error {
+	if !validSnapshotID(snapshotID) || !validSnapshotPath(path) || path == "" || path == "." {
+		return ErrInvalidSnapshotRequest
+	}
+	return nil
+}
+
+func validSnapshotPath(path string) bool {
+	if !utf8.ValidString(path) || strings.ContainsRune(path, 0) || strings.HasPrefix(path, "-") {
+		return false
+	}
+	for _, part := range strings.Split(path, "/") {
+		if part == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func maintenanceErr(op string, err error) error {
