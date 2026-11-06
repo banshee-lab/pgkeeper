@@ -45,7 +45,7 @@ func readPID(path string) (int, error) {
 		return 0, err
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || pid <= 1 {
+	if err != nil || pid <= 0 {
 		return 0, fmt.Errorf("invalid PID file %s", path)
 	}
 	return pid, nil

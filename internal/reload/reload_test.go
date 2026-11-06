@@ -24,6 +24,16 @@ func TestPIDFileLifecycle(t *testing.T) {
 	}
 }
 
+func TestReadPIDAllowsInitProcess(t *testing.T) {
+	p := filepath.Join(t.TempDir(), ".pgkeeper.pid")
+	if err := os.WriteFile(p, []byte("1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if pid, err := readPID(p); err != nil || pid != 1 {
+		t.Fatalf("pid=%d err=%v, want pid=1 and no error", pid, err)
+	}
+}
+
 func TestRemovePIDKeepsOthers(t *testing.T) {
 	p := PIDFile(t.TempDir())
 	os.MkdirAll(filepath.Dir(p), 0o700)
