@@ -2,10 +2,11 @@
 	import { Button, Heading } from '@runwisp/ui';
 	import { toast } from '@runwisp/ui';
 	import AttentionPanel from '#lib/components/AttentionPanel.svelte';
+	import NextSchedulesPanel from '#lib/components/NextSchedulesPanel.svelte';
 	import RecentPanel from '#lib/components/RecentPanel.svelte';
 	import RunningPanel from '#lib/components/RunningPanel.svelte';
 	import StatTile from '#lib/components/StatTile.svelte';
-	import { deriveDashboard } from '#lib/dashboard';
+	import { deriveDashboard, deriveSchedules } from '#lib/dashboard';
 	import { relativeShort } from '#lib/format';
 	import { activities } from '#lib/stores/activities.svelte';
 	import { backups } from '#lib/stores/backups.svelte';
@@ -14,6 +15,7 @@
 	let refreshing = $state(false);
 	const summary = $derived(deriveDashboard(backups.list));
 	const running = $derived(backups.list.filter((backup) => backup.running));
+	const schedules = $derived(deriveSchedules(backups.list, activities.repositories));
 
 	async function refresh() {
 		if (refreshing) return;
@@ -50,7 +52,6 @@
 			Recent activity could not be loaded: {activities.error}
 		</p>
 	{/if}
-
 	{#if summary.projectCount === 0 && backups.state === 'ready'}
 		<div class="border-t border-outline py-5">
 			<Heading level={2} size="sm">No projects configured</Heading>
@@ -75,5 +76,8 @@
 		<AttentionPanel items={summary.failed} now={clock.now} />
 	</div>
 
-	<RecentPanel items={activities.recent} now={clock.now} />
+	<div class="grid gap-x-8 gap-y-7 lg:grid-cols-2">
+		<RecentPanel items={activities.recent} now={clock.now} />
+		<NextSchedulesPanel items={schedules} />
+	</div>
 </div>

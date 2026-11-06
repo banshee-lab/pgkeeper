@@ -2,7 +2,7 @@
 	import { Input } from '@runwisp/ui';
 	import { page } from '$app/state';
 	import type { Backup, Repository } from '#lib/api/types';
-	import { projectHref } from '#lib/dashboard';
+	import { projectHref, repositoryLabel } from '#lib/dashboard';
 	import { listRepositories } from '#lib/api/client';
 	import { backups } from '#lib/stores/backups.svelte';
 	import { onMount } from 'svelte';
@@ -22,12 +22,6 @@
 
 	function statusOf(backup: Backup) {
 		return backups.statusOf(backup);
-	}
-
-	function repositoryLabel(repository: Repository) {
-		if (repository.is_main) return 'Main Repository';
-		const firstBackup = repository.backups[0];
-		return firstBackup ? `${firstBackup} Repository` : repository.name;
 	}
 
 	onMount(() => {
