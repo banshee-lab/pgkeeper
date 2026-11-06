@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { serverNow } from '$lib/api/client';
-	import { formatDateTime, nextRunUpdateDelay, relativeShort } from '$lib/format';
+	import { serverNow } from '#lib/api/client';
+	import { formatDateTime, nextRunUpdateDelay, relativeShort } from '#lib/format';
 
 	let { value }: { value: string | null } = $props();
 	let now = $state(serverNow());

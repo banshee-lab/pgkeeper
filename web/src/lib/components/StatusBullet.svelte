@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { StatusDot } from '@runwisp/ui';
-	import { statusLabel } from '$lib/format';
+	import { statusLabel } from '#lib/format';
 
 	type Status = 'running' | 'success' | 'error' | 'never';
 

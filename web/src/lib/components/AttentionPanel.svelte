@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { Button, Heading } from '@runwisp/ui';
 	import { toast } from '@runwisp/ui';
-	import { ApiError, runBackup } from '$lib/api/client';
-	import type { Backup } from '$lib/api/types';
-	import { activityHref, projectHref } from '$lib/dashboard';
-	import { relativeShort } from '$lib/format';
-	import { activities } from '$lib/stores/activities.svelte';
-	import { backups } from '$lib/stores/backups.svelte';
+	import { ApiError, runBackup } from '#lib/api/client';
+	import type { Backup } from '#lib/api/types';
+	import { activityHref, projectHref } from '#lib/dashboard';
+	import { relativeShort } from '#lib/format';
+	import { activities } from '#lib/stores/activities.svelte';
+	import { backups } from '#lib/stores/backups.svelte';
 
 	let { items, now }: { items: Backup[]; now: number } = $props();
 	let retrying = $state<string | null>(null);

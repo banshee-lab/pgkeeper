@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Button, CodeBlock, Heading } from '@runwisp/ui';
-	import type { Activity } from '$lib/api/types';
-	import { formatDateTime, statusLabel, stripAnsi, triggerLabel } from '$lib/format';
-	import { logStream } from '$lib/stores/log-stream.svelte';
+	import type { Activity } from '#lib/api/types';
+	import { formatDateTime, statusLabel, stripAnsi, triggerLabel } from '#lib/format';
+	import { logStream } from '#lib/stores/log-stream.svelte';
 	import StatusBullet from './StatusBullet.svelte';
 
 	let {

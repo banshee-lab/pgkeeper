@@ -1,5 +1,5 @@
-import { getActivity, listActivities, listBackupActivities } from '$lib/api/client';
-import type { Activity } from '$lib/api/types';
+import { getActivity, listActivities, listBackupActivities } from '#lib/api/client';
+import type { Activity } from '#lib/api/types';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 

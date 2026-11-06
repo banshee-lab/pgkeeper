@@ -3,13 +3,13 @@
 	import { onMount } from 'svelte';
 	import { Alert, Button, Heading, ToastContainer } from '@runwisp/ui';
 	import { toast } from '@runwisp/ui';
-	import { activities } from '$lib/stores/activities.svelte';
-	import { backups } from '$lib/stores/backups.svelte';
-	import { clock } from '$lib/stores/clock.svelte';
-	import { connection } from '$lib/stores/connection.svelte';
-	import { session } from '$lib/stores/session.svelte';
-	import AppShell from '$lib/components/AppShell.svelte';
-	import LoginScreen from '$lib/components/LoginScreen.svelte';
+	import { activities } from '#lib/stores/activities.svelte';
+	import { backups } from '#lib/stores/backups.svelte';
+	import { clock } from '#lib/stores/clock.svelte';
+	import { connection } from '#lib/stores/connection.svelte';
+	import { session } from '#lib/stores/session.svelte';
+	import AppShell from '#lib/components/AppShell.svelte';
+	import LoginScreen from '#lib/components/LoginScreen.svelte';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();

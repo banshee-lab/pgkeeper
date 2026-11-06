@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { StatusDot } from '@runwisp/ui';
-	import type { ConnectionState } from '$lib/stores/connection.svelte';
+	import type { ConnectionState } from '#lib/stores/connection.svelte';
 
 	let { state }: { state: ConnectionState } = $props();
 	const label = $derived(

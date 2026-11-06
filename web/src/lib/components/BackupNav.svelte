@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { Input } from '@runwisp/ui';
 	import { page } from '$app/state';
-	import type { Backup } from '$lib/api/types';
-	import { projectHref } from '$lib/dashboard';
-	import { backups } from '$lib/stores/backups.svelte';
+	import type { Backup } from '#lib/api/types';
+	import { projectHref } from '#lib/dashboard';
+	import { backups } from '#lib/stores/backups.svelte';
 	import StatusBullet from './StatusBullet.svelte';
 
 	interface Props {

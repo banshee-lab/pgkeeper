@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { Button, toast } from '@runwisp/ui';
-	import { ApiError, listBackupActivities, runBackup } from '$lib/api/client';
-	import { activities } from '$lib/stores/activities.svelte';
-	import { backups } from '$lib/stores/backups.svelte';
+	import { ApiError, listBackupActivities, runBackup } from '#lib/api/client';
+	import { activities } from '#lib/stores/activities.svelte';
+	import { backups } from '#lib/stores/backups.svelte';
 
 	let { name, running }: { name: string; running: boolean } = $props();
 	let loading = $state(false);

@@ -1,4 +1,4 @@
-import type { Activity, Job } from '$lib/api/types';
+import type { Activity, Job } from '#lib/api/types';
 
 let byActivity = $state<Map<string, Job>>(new Map());
 

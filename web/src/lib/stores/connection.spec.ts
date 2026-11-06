@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Activity, Backup, Job, Snapshot } from '$lib/api/types';
+import type { Activity, Backup, Job, Snapshot } from '#lib/api/types';
 
 const mocks = vi.hoisted(() => ({
 	getBackup: vi.fn(),
@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
 	setUnauthorizedHandler: vi.fn()
 }));
 
-vi.mock('$lib/api/client', () => ({
+vi.mock('#lib/api/client', () => ({
 	getBackup: mocks.getBackup,
 	listBackups: mocks.listBackups,
 	listActivities: mocks.listActivities,

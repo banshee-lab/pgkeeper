@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
 	setUnauthorizedHandler: vi.fn()
 }));
 
-vi.mock('$lib/api/client', () => ({
+vi.mock('#lib/api/client', () => ({
 	ApiError: class ApiError extends Error {
 		constructor(
 			public status: number,
@@ -24,7 +24,7 @@ vi.mock('$lib/api/client', () => ({
 	serverNow: () => Date.now()
 }));
 
-import { ApiError } from '$lib/api/client';
+import { ApiError } from '#lib/api/client';
 import { loginRedirectUrl, session } from './session.svelte';
 
 describe('session', () => {

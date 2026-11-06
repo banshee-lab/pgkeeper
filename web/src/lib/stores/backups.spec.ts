@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Backup } from '$lib/api/types';
+import type { Backup } from '#lib/api/types';
 import { backups } from './backups.svelte';
 
 function backup(running: boolean, lastStatus: 'success' | 'error' | null): Backup {
