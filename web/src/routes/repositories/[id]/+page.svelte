@@ -41,7 +41,7 @@
 	let error = $state('');
 	let loading = $state(true);
 	let busy = $state(false);
-	let chosenActivityId = $state('');
+	let chosenActivityId = $state(page.url.searchParams.get('activity') ?? '');
 	let source: EventSource | null = null;
 	let refreshTimer: ReturnType<typeof setInterval> | undefined;
 	let treeRequest = 0;
