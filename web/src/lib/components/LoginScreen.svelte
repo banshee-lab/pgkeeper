@@ -8,9 +8,9 @@
 	<section class="w-full max-w-md space-y-5 border-t border-outline bg-surface-raised p-6 sm:p-8">
 		<div class="flex items-center gap-3">
 			<img src="/favicon.png" alt="" aria-hidden="true" class="h-10 w-10 rounded-[3px] object-contain" />
-			<Heading level={1} size="xl">pgkeeper</Heading>
+			<Heading level={1} size="xl">pgKeeper</Heading>
 		</div>
-		<p class="text-sm leading-6 text-on-surface-muted">PostgreSQL backups, scheduled and protected.</p>
+		<p class="text-sm leading-6 text-on-surface-muted"></p>
 		{#if expired}
 			<Alert variant="warning" title="Your session expired">
 				Sign in again to continue.
