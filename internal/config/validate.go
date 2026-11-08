@@ -17,6 +17,16 @@ var CronParser = cron.NewParser(
 
 var labelRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$`)
 
+// imageRe accepts docker image references (name, registry, tag, digest).
+var imageRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,254}$`)
+
+func checkImage(v string) error {
+	if !imageRe.MatchString(v) {
+		return errors.New("must be a docker image reference such as postgres:17")
+	}
+	return nil
+}
+
 func keyErr(file, key, format string, args ...any) error {
 	return fmt.Errorf("%s: %s: %s", file, key, fmt.Sprintf(format, args...))
 }

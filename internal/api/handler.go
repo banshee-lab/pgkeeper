@@ -35,6 +35,7 @@ type Deps struct {
 	Snapshots  domain.SnapshotRepository // optional: latest_snapshot is null without it
 	Catalog    domain.BackupCatalog
 	Runner     domain.BackupRunner
+	Restorer   domain.RestoreRunner // optional: restore endpoints answer 503 without it
 	Scheduler  domain.Scheduler // optional: next_run is null without it
 	Jobs       JobFeed          // optional: defaults to Runner when it implements JobFeed
 	JobHub     *events.Hub[events.JobEvent]
@@ -239,6 +240,8 @@ func (h *Handler) RunBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, CodeBackupNotFound, "backup '"+name+"' does not exist")
 	case errors.Is(err, domain.ErrBackupRunning):
 		writeError(w, http.StatusConflict, CodeBackupRunning, "backup '"+name+"' is already running")
+	case errors.Is(err, domain.ErrRestoreRunning):
+		writeError(w, http.StatusConflict, CodeRestoreRunning, "a restore of '"+name+"' is running")
 	case errors.Is(err, backup.ErrShuttingDown):
 		writeError(w, http.StatusServiceUnavailable, CodeUnavailable, "server is shutting down")
 	case err != nil:

@@ -6,6 +6,7 @@
 	import ActivityList from '#lib/components/ActivityList.svelte';
 	import DetailsPanel from '#lib/components/DetailsPanel.svelte';
 	import OutputPanel from '#lib/components/OutputPanel.svelte';
+	import RestoreButton from '#lib/components/RestoreButton.svelte';
 	import RunButton from '#lib/components/RunButton.svelte';
 	import { stripAnsi } from '#lib/format';
 	import type { Activity } from '#lib/api/types';
@@ -178,7 +179,10 @@
 	<div class="space-y-6">
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<Heading level={1} size="2xl">{backup.name}</Heading>
-			<RunButton name={backup.name} running={Boolean(backup.running)} />
+			<div class="flex items-center gap-2">
+				<RestoreButton {backup} />
+				<RunButton name={backup.name} running={Boolean(backup.running)} />
+			</div>
 		</div>
 
 		<DetailsPanel {backup} />

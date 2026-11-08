@@ -31,12 +31,19 @@ check-read-percent = 80            # % of data read back (default 80)
 # skip-prune = true                # forget after each backup without pruning;
                                    # then only prune-cron reclaims space
 
+# Test restores: a throw-away PostgreSQL container is started from this image,
+# the latest snapshot is restored into it and the container is removed again.
+[restore]
+restore_image = "postgres:18"   # default image for restore containers
+
 [backup.main_db]
 cron       = "@daily"
 container  = "postgres-main"
 database   = "app"
 restic_tag = "main_db"
 roles      = true
+restore_cron  = "0 5 * * *"     # scheduled test restore (optional)
+restore_image = "postgres:17"   # optional override; falls back to [restore].restore_image
 
 [backup.reports]
 cron        = "30 2 * * *"

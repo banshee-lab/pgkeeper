@@ -30,6 +30,8 @@ type Cron struct {
 	backups map[string]entry
 	maint   domain.MaintenanceRunner
 	tasks   map[domain.MaintenanceKind]entry
+	restore domain.RestoreRunner
+	tests   map[string]entry // scheduled test restores, by backup name
 }
 
 var _ domain.Scheduler = (*Cron)(nil)
@@ -42,6 +44,7 @@ func New(loc *time.Location, backups []domain.BackupConfig, runner domain.Backup
 		c:       cron.New(cron.WithLocation(loc), cron.WithParser(config.CronParser)),
 		backups: make(map[string]entry, len(backups)),
 		tasks:   map[domain.MaintenanceKind]entry{},
+		tests:   map[string]entry{},
 		runner:  runner,
 		log:     logger,
 	}
@@ -83,6 +86,24 @@ func (s *Cron) SetMaintenance(m domain.MaintenanceRunner) {
 	s.mu.Unlock()
 }
 
+// SetRestorer sets the runner behind the scheduled test restores
+// (restore_cron). Call Reload afterwards to register them.
+func (s *Cron) SetRestorer(r domain.RestoreRunner) {
+	s.mu.Lock()
+	s.restore = r
+	s.mu.Unlock()
+}
+
+func (s *Cron) addTestRestore(name, spec string) error {
+	id, err := s.c.AddFunc(spec, func() { s.restoreTick(name) })
+	if err != nil {
+		return fmt.Errorf("backup %q: invalid restore_cron %q: %w", name, spec, err)
+	}
+	s.tests[name] = entry{id: id, spec: spec}
+	s.log.Info("test restore schedule registered", "backup", name, "cron", spec)
+	return nil
+}
+
 // Reload makes the registered schedules match backups and mc without a
 // restart. All cron expressions are validated first; on error nothing
 // changes. Entries with an unchanged schedule are kept as they are, removed
@@ -91,6 +112,11 @@ func (s *Cron) Reload(backups []domain.BackupConfig, mc domain.MaintenanceConfig
 	for _, b := range backups {
 		if _, err := config.CronParser.Parse(b.Cron); err != nil {
 			return fmt.Errorf("backup %q: invalid cron %q: %w", b.Name, b.Cron, err)
+		}
+		if b.RestoreCron != "" {
+			if _, err := config.CronParser.Parse(b.RestoreCron); err != nil {
+				return fmt.Errorf("backup %q: invalid restore_cron %q: %w", b.Name, b.RestoreCron, err)
+			}
 		}
 	}
 	want := map[domain.MaintenanceKind]string{}
@@ -109,6 +135,32 @@ func (s *Cron) Reload(backups []domain.BackupConfig, mc domain.MaintenanceConfig
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	wantTests := map[string]string{}
+	for _, b := range backups {
+		if b.RestoreCron != "" {
+			wantTests[b.Name] = b.RestoreCron
+		}
+	}
+	if s.restore == nil && len(wantTests) > 0 {
+		s.log.Warn("restore schedules ignored: no restore runner")
+		wantTests = nil
+	}
+	for name, e := range s.tests {
+		if spec, ok := wantTests[name]; !ok || spec != e.spec {
+			s.c.Remove(e.id)
+			delete(s.tests, name)
+			if !ok {
+				s.log.Info("test restore schedule removed", "backup", name)
+			}
+		}
+	}
+	var testErrs []error
+	for name, spec := range wantTests {
+		if _, ok := s.tests[name]; !ok {
+			testErrs = append(testErrs, s.addTestRestore(name, spec))
+		}
+	}
 
 	keep := make(map[string]string, len(backups))
 	for _, b := range backups {
@@ -148,7 +200,24 @@ func (s *Cron) Reload(backups []domain.BackupConfig, mc domain.MaintenanceConfig
 			errs = append(errs, s.addTask(kind, spec))
 		}
 	}
-	return errors.Join(errs...)
+	return errors.Join(append(errs, testErrs...)...)
+}
+
+func (s *Cron) restoreTick(name string) {
+	s.mu.RLock()
+	r := s.restore
+	s.mu.RUnlock()
+	if r == nil {
+		return
+	}
+	_, err := r.TestRestore(context.Background(), name, domain.TriggerSchedule)
+	switch {
+	case err == nil:
+	case errors.Is(err, domain.ErrBackupRunning), errors.Is(err, domain.ErrRestoreRunning):
+		s.log.Warn("skipping scheduled test restore, project is busy", "backup", name, "err", err)
+	default:
+		s.log.Error("scheduled test restore failed to start", "backup", name, "err", err)
+	}
 }
 
 func (s *Cron) tick(name string) {

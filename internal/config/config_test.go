@@ -146,3 +146,39 @@ func TestSkipPrune(t *testing.T) {
 		t.Fatalf("backup override ignored: err=%v", err)
 	}
 }
+
+func TestRestoreSettings(t *testing.T) {
+	body := resticOK + "[restore]\nrestore_image = \"pg18\"\n" +
+		"[backup.a]\n" + std + "restore_cron = \"0 * * * *\"\nrestore_image = \"pg17\"\n" +
+		"[backup.b]\n" + std + "restore_cron = \"@daily\"\n" +
+		"[backup.c]\n" + std
+	cfg, err := loadWith(t, "", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := cfg.Get("a")
+	b, _ := cfg.Get("b")
+	c, _ := cfg.Get("c")
+	if a.RestoreCron != "0 * * * *" || a.RestoreImage != "pg17" {
+		t.Fatalf("override: %+v", a)
+	}
+	if b.RestoreCron != "@daily" || b.RestoreImage != "pg18" {
+		t.Fatalf("fallback to global image: %+v", b)
+	}
+	if c.RestoreCron != "" || c.RestoreImage != "pg18" {
+		t.Fatalf("no schedule: %+v", c)
+	}
+}
+
+func TestRestoreSettingsValidation(t *testing.T) {
+	for name, body := range map[string]string{
+		"cron without image": resticOK + "[backup.a]\n" + std + "restore_cron = \"@daily\"\n",
+		"bad cron":           resticOK + "[restore]\nrestore_image = \"pg18\"\n[backup.a]\n" + std + "restore_cron = \"nope\"\n",
+		"bad image":          resticOK + "[restore]\nrestore_image = \"-rm\"\n[backup.a]\n" + std,
+		"unknown key":        resticOK + "[restore]\nimage = \"pg18\"\n[backup.a]\n" + std,
+	} {
+		if _, err := loadWith(t, "", body); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}

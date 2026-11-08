@@ -100,6 +100,16 @@
     "restic": {
       "$ref": "#/$defs/restic"
     },
+    "restore": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "restore_image": {
+          "type": "string",
+          "description": "Default image of the ephemeral containers used by test restores."
+        }
+      }
+    },
     "backup": {
       "type": "object",
       "propertyNames": {
@@ -196,6 +206,14 @@
         "restic_tag": {
           "type": "string",
           "description": "Defaults to the backup name; must not contain whitespace or commas."
+        },
+        "restore_cron": {
+          "type": "string",
+          "description": "Cron expression for scheduled test restores of this backup; requires a restore image."
+        },
+        "restore_image": {
+          "type": "string",
+          "description": "Image for this backup's test-restore containers; falls back to [restore].restore_image."
         },
         "roles": {
           "type": "boolean",

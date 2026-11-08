@@ -173,6 +173,9 @@ The API includes:
 | `GET /api/v1/backups`, `GET /api/v1/backups/{name}` | Configured backup details, including `timezone` and `last_success_at` |
 | `GET /api/v1/backups/{name}/activities` | Paginated activity history for one backup |
 | `POST /api/v1/backups/{name}/run` | Start a manual backup |
+| `GET /api/v1/backups/{name}/restore/snapshots` | Restorable snapshots of the backup, newest first |
+| `POST /api/v1/backups/{name}/restore/test` | Start a manual test restore into an ephemeral container |
+| `POST /api/v1/backups/{name}/restore/container` | Restore a snapshot into a live / custom container |
 | `GET /api/v1/activities`, `GET /api/v1/activities/{id}` | Paginated activity list and single-activity detail |
 | `GET /api/v1/activities/{id}/log` | Read an activity log; add `?download=1` for a file download |
 | `GET /api/v1/activities/{id}/log/stream` | Replay and follow an activity log over SSE |
@@ -205,9 +208,46 @@ after 3 seconds on disconnect. When auth is enabled and the session expires
 while a stream is open, the server closes the connection without further events;
 clients must reconnect and obtain a fresh session.
 
-Manual starts return `202` when accepted, `409` if that backup is already
-running, and `503` during shutdown. The complete request and response schema is
+Manual starts return `202` when accepted, `409` if that backup (or a restore of
+it) is already running, and `503` during shutdown. The complete request and response schema is
 in [openapi.yaml](openapi.yaml).
+
+## Restores
+
+Every project can be restored from its restic snapshots. A restore is an
+activity next to the backups (`kind` `test_restore` or `restore`, label
+`Test Restore` / `Container Restore`, `triggered_by` `manual` or `schedule`)
+with the full console output in its log; a failed restore sets the status to
+`error` and sends the usual failure notification.
+
+A project runs one backup *or* restore at a time: starting another while one is
+running returns `409` (`backup_running` / `restore_running`); scheduled runs
+skip with a warning. The dump files are fetched with `restic dump` while holding
+the shared per-repository gate, so restores queue with backups and maintenance.
+
+- **Test restore** (`POST …/restore/test`, or `restore_cron`): restores the
+  latest snapshot into a throw-away PostgreSQL container (`docker run --rm
+  --network none`) built from the project's `restore_image`, else the global
+  `[restore].restore_image`. The roles dump is applied too when the snapshot
+  has one. The container is force-removed when the run ends, whatever the
+  outcome; leftovers of a crashed process are removed at startup.
+- **Restore to container** (`POST …/restore/container`): restores the chosen
+  snapshot into any container/database (default: the project's own). The target
+  database is **dropped and recreated**. With `include_roles` the roles dump is
+  applied first; roles that already exist are overwritten (attributes and
+  password) and each overwrite is logged as a `NOTICE`. The connection host,
+  port and user are the project's.
+
+```toml
+[restore]
+restore_image = "postgres:18"   # default image for restore containers
+
+[backup.project1]
+restore_cron  = "0 * * * *"     # scheduled test restore (optional)
+restore_image = "postgres:17"   # optional override
+```
+
+`restore_cron` requires an image (project or global).
 
 ## Running and operating
 

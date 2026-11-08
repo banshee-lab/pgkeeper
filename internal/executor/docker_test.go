@@ -31,3 +31,19 @@ func TestBuildArgs(t *testing.T) {
 		t.Fatal("expected error for unknown kind")
 	}
 }
+func TestRestoreArgs(t *testing.T) {
+	got := startEphemeralArgs("pgkeeper-restore-x", "postgres:18")
+	want := []string{"run", "--detach", "--rm", "--name", "pgkeeper-restore-x", "--network", "none",
+		"--label", "pgkeeper.restore=true", "--env", "POSTGRES_HOST_AUTH_METHOD=trust", "postgres:18"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %q", got)
+	}
+
+	tgt := domain.SQLTarget{Container: "pg", Host: "localhost", Port: 5432, Username: "postgres", Database: "my db;rm -rf /"}
+	got = psqlArgs(tgt)
+	want = []string{"exec", "-i", "pg", "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "--no-password",
+		"--host=localhost", "-p", "5432", "--username=postgres", "-d", "my db;rm -rf /"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %q", got)
+	}
+}
