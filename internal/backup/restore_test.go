@@ -87,11 +87,26 @@ func (f fakeInspector) RepositorySnapshotStats(context.Context, domain.ResticCon
 	return domain.RepositorySnapshotStats{}, nil
 }
 
-func (f fakeInspector) RepositoryTree(context.Context, domain.ResticConfig, string, string) ([]domain.RepositoryNode, error) {
+// RepositoryTree serves a tree whose real location differs from the snapshot
+// "paths" hint, like restic does in practice.
+func (f fakeInspector) RepositoryTree(_ context.Context, _ domain.ResticConfig, _, p string) ([]domain.RepositoryNode, error) {
+	dir := func(path string) domain.RepositoryNode { return domain.RepositoryNode{Path: path, Type: "dir"} }
+	file := func(path string) domain.RepositoryNode { return domain.RepositoryNode{Path: path, Type: "file", Size: 1} }
+	switch p {
+	case "":
+		return []domain.RepositoryNode{dir("/data")}, nil
+	case "/data":
+		return []domain.RepositoryNode{dir("/data/a")}, nil
+	case "/data/a":
+		return []domain.RepositoryNode{file("/data/a/app.sql"), file("/data/a/app_roles.sql")}, nil
+	}
 	return nil, nil
 }
 
 func (f fakeInspector) DownloadSnapshotFile(_ context.Context, _ domain.ResticConfig, _, p string, dst io.Writer) error {
+	if !strings.HasPrefix(p, "/data/a/") {
+		return errors.New("path " + p + " not found in snapshot")
+	}
 	body := "CREATE TABLE t (id int);\n"
 	if strings.HasSuffix(p, "_roles.sql") {
 		body = "CREATE ROLE app_user;\nALTER ROLE app_user WITH LOGIN;\n"
