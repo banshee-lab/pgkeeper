@@ -46,6 +46,7 @@ type BackupDTO struct {
 	Restic        ResticDTO    `json:"restic"`
 	Running       bool         `json:"running"`
 	NextRun       *string      `json:"next_run"`
+	NextRestoreRun *string     `json:"next_restore_run"` // next scheduled test restore; null if disabled
 	LastSuccessAt *string      `json:"last_success_at"`
 	LastActivity  *ActivityDTO `json:"last_activity"`
 
@@ -174,7 +175,7 @@ func redactRepo(s string) string { return credsRe.ReplaceAllString(s, "${1}***@"
 // ToBackupDTO: next is the scheduler's next run (nil if unknown), last the
 // latest activity (nil if none), lastSuccessAt the last successful run time
 // (zero, false if never), tz the effective IANA timezone name.
-func ToBackupDTO(b domain.BackupConfig, running bool, next *time.Time, last *domain.Activity, lastSuccessAt time.Time, hasSuccess bool, tz string) BackupDTO {
+func ToBackupDTO(b domain.BackupConfig, running bool, next, nextRestore *time.Time, last *domain.Activity, lastSuccessAt time.Time, hasSuccess bool, tz string) BackupDTO {
 	d := BackupDTO{
 		Name: b.Name, Cron: b.Cron, Timezone: tz,
 		Container: b.Container, Database: b.Database,
@@ -190,6 +191,7 @@ func ToBackupDTO(b domain.BackupConfig, running bool, next *time.Time, last *dom
 		},
 		Running:       running,
 		NextRun:       timePtr(next),
+		NextRestoreRun: timePtr(nextRestore),
 		LastSuccessAt: timePtrVal(lastSuccessAt, hasSuccess),
 	}
 	if last != nil {

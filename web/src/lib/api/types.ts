@@ -60,6 +60,7 @@ export interface Backup {
 	restic: ResticView;
 	running: boolean;
 	next_run: string | null;
+	next_restore_run?: string | null;
 	last_success_at: string | null;
 	last_activity: Activity | null;
 	latest_snapshot: Snapshot | null;
