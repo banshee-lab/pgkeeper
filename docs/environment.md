@@ -17,11 +17,11 @@ to make it configurable this way.
 | Variable | Where it is used | Behavior |
 | --- | --- | --- |
 | `PGKEEPER_CONFIG` | Executable | Selects the TOML file if `-config` is not supplied. Defaults to `/etc/pgkeeper/pgkeeper.toml`. A non-empty `-config` flag takes precedence. |
-| `PGKEEPER_TEMP_PATH` | `examples/pgkeeper.toml` | Example reference for `global.temp_path`; defaults to `/var/tmp`. |
-| `PGKEEPER_LOG_PATH` | `examples/pgkeeper.toml` | Example reference for `global.log_path`; defaults to `/var/log`. |
-| `PGKEEPER_DB_PATH` | `examples/pgkeeper.toml` | Example reference for `global.db_path`; defaults to `/var/lib/pgkeeper/pgkeeper.db`. |
-| `TG_BOT_TOKEN` | `examples/pgkeeper.toml` | Example reference for `[telegram].bot_token`; required if that example setting is used. |
-| `TG_CHAT_ID` | `examples/pgkeeper.toml` | Example reference for `[telegram].chat_id`; required if that example setting is used. |
+| `PGKEEPER_TEMP_PATH` | `examples/pgkeeper.toml` | Example reference for `global.temp-path`; defaults to `/var/tmp`. |
+| `PGKEEPER_LOG_PATH` | `examples/pgkeeper.toml` | Example reference for `global.log-path`; defaults to `/var/log`. |
+| `PGKEEPER_DB_PATH` | `examples/pgkeeper.toml` | Example reference for `global.db-path`; defaults to `/var/lib/pgkeeper/pgkeeper.db`. |
+| `TG_BOT_TOKEN` | `examples/pgkeeper.toml` | Example reference for `[telegram].bot-token`; required if that example setting is used. |
+| `TG_CHAT_ID` | `examples/pgkeeper.toml` | Example reference for `[telegram].chat-id`; required if that example setting is used. |
 | `OIDC_SECRET` | `examples/pgkeeper.toml` | Example reference for `[auth].secret`; required if that example setting is used. |
 | `RESTIC_PASSWORD` | `examples/pgkeeper.toml` | Example reference for `[restic].password`; required for backups using that restic configuration. |
 

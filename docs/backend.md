@@ -29,7 +29,7 @@ The main runtime components are:
 | `internal/api` | HTTP routes, handlers, authentication middleware, SSE streams, and origin enforcement |
 
 Application logs are structured JSON written to standard output. Execution logs
-are separate files under `global.log_path`. Subprocess stderr (pg_dump output)
+are separate files under `global.log-path`. Subprocess stderr (pg_dump output)
 is passed through a line-level redactor before being written to the log file;
 secrets known to pgkeeper (the restic repository password and any URL-embedded
 credentials) are replaced with `***`. PostgreSQL passwords are managed inside
@@ -50,7 +50,7 @@ returns `409`, while an overlapping scheduled tick is skipped. Each run:
 2. Runs `pg_dump` inside the configured container using `docker exec`. If
    `roles = true`, it also runs `pg_dumpall --roles-only`.
 3. Writes dump files to a private per-backup directory under
-   `global.temp_path`; empty dumps are treated as errors.
+   `global.temp-path`; empty dumps are treated as errors.
 4. Waits its turn for the restic repository (see below), ensures it exists,
    creates one snapshot for the run, records the snapshot summary, then applies
    configured retention when at least one retention value is set.
@@ -92,6 +92,9 @@ references, and the space is then reclaimed only by the scheduled prune below.
 Use it together with `prune-cron` (a warning is logged at startup and on reload
 when `skip-prune` is set without it).
 
+Per-backup restic overrides can use a `restic-` prefix (for example,
+`restic-keep-daily`); the unprefixed keys remain supported for compatibility.
+
 Two optional global tasks are configured in `[restic]` (`prune-cron`,
 `check-cron` and `check-read-percent` are not valid inside `[backup.*]`); an
 empty cron disables the task:
@@ -124,7 +127,7 @@ so restic releases its lock.
 Run `pgkeeper -reload` (with the same `-config`/`PGKEEPER_CONFIG`) to make the
 running service re-read its file. The file is validated first; an invalid one
 is reported and nothing is signalled. The command sends `SIGHUP` to the PID in
-`<global.temp_path>/pgkeeper/.pgkeeper.pid` (`kill -HUP <pid>` works too) and
+`<global.temp-path>/pgkeeper/.pgkeeper.pid` (`kill -HUP <pid>` works too) and
 the daemon logs `config reloaded` or `config reload failed`; on failure the
 running configuration stays active.
 
@@ -143,9 +146,9 @@ are expanded from the process environment; `${VAR:-default}` uses the default
 when the variable is unset or empty. See [Environment variables](environment.md)
 and [the example configuration](../examples/pgkeeper.toml).
 
-`global.db_path` is the SQLite database path; migrations are embedded in the
-binary and applied automatically at startup. `global.log_path` holds one log
-file per activity. `global.temp_path` holds temporary dumps and restic cache
+`global.db-path` is the SQLite database path; migrations are embedded in the
+binary and applied automatically at startup. `global.log-path` holds one log
+file per activity. `global.temp-path` holds temporary dumps and restic cache
 data. Activity history has no automatic retention policy.
 
 ## HTTP API
@@ -225,10 +228,10 @@ running returns `409` (`backup_running` / `restore_running`); scheduled runs
 skip with a warning. The dump files are fetched with `restic dump` while holding
 the shared per-repository gate, so restores queue with backups and maintenance.
 
-- **Test restore** (`POST …/restore/test`, or `restore_cron`): restores the
+- **Test restore** (`POST …/restore/test`, or `restore-cron`): restores the
   latest snapshot into a throw-away PostgreSQL container (`docker run --rm
-  --network none`) built from the project's `restore_image`, else the global
-  `[restore].restore_image`. The roles dump is applied too when the snapshot
+  --network none`) built from the project's `restore-image`, else the global
+  `[restore].restore-image`. The roles dump is applied too when the snapshot
   has one. The container is force-removed when the run ends, whatever the
   outcome; leftovers of a crashed process are removed at startup.
 - **Restore to container** (`POST …/restore/container`): restores the chosen
@@ -240,14 +243,14 @@ the shared per-repository gate, so restores queue with backups and maintenance.
 
 ```toml
 [restore]
-restore_image = "postgres:18"   # default image for restore containers
+restore-image = "postgres:18"   # default image for restore containers
 
 [backup.project1]
-restore_cron  = "0 * * * *"     # scheduled test restore (optional)
-restore_image = "postgres:17"   # optional override
+restore-cron  = "0 * * * *"     # scheduled test restore (optional)
+restore-image = "postgres:17"   # optional override
 ```
 
-`restore_cron` requires an image (project or global).
+`restore-cron` requires an image (project or global).
 
 ## Running and operating
 

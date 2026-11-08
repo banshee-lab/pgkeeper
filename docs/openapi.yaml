@@ -208,8 +208,8 @@ paths:
       summary: Start a test restore into an ephemeral container
       description: >
         Restores the latest snapshot into a throw-away PostgreSQL container
-        (image: the backup's `restore_image`, else the global
-        `[restore].restore_image`). The container is removed when the restore
+        (image: the backup's `restore-image`, else the global
+        `[restore].restore-image`). The container is removed when the restore
         ends, whatever the outcome. The execution is an activity of kind
         `test_restore`; its log holds the full console output. Requires a
         same-origin Origin or Referer header.
@@ -858,7 +858,7 @@ components:
         port: { type: integer }
         roles: { type: boolean }
         restore_cron: { type: string, description: 'Cron of the scheduled test restores; empty when disabled' }
-        restore_image: { type: string, description: 'Image of the ephemeral test-restore container (project override, else the global restore_image)' }
+        restore_image: { type: string, description: 'Image of the ephemeral test-restore container (project override, else the global restore-image)' }
         restic: { $ref: '#/components/schemas/ResticView' }
         running: { type: boolean }
         next_run: { type: string, format: date-time, nullable: true }

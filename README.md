@@ -45,15 +45,15 @@ Create `pgkeeper.toml` next to the Compose file:
 ```toml
 [global]
 listen    = ":8080"
-db_path   = "/var/lib/pgkeeper/pgkeeper.db"
-log_path  = "/var/lib/pgkeeper"
-temp_path = "/var/lib/pgkeeper"
+db-path   = "/var/lib/pgkeeper/pgkeeper.db"
+log-path  = "/var/lib/pgkeeper"
+temp-path = "/var/lib/pgkeeper"
 
 [auth]
 issuer       = "${OIDC_ISSUER}"
-client_id    = "${OIDC_CLIENT_ID}"
+client-id    = "${OIDC_CLIENT_ID}"
 secret       = "${OIDC_CLIENT_SECRET}"
-redirect_url = "${OIDC_REDIRECT_URL}"
+redirect-url = "${OIDC_REDIRECT_URL}"
 
 [restic]
 repository = "s3:s3.example.com/pgkeeper/production"
