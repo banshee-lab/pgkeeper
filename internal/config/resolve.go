@@ -114,6 +114,17 @@ func (l *loader) resolve() (*Config, []error) {
 	}
 	cfg.Maintenance = resolveMaintenance(l.srcOr("restic"), gr, add)
 
+	// ---- global restore ----
+	globalRestoreImage := ""
+	if r.Restore != nil {
+		globalRestoreImage = strings.TrimSpace(deref(r.Restore.RestoreImage, ""))
+		if globalRestoreImage != "" {
+			if err := checkImage(globalRestoreImage); err != nil {
+				add(keyErr(l.srcOr("restore"), "restore.restore_image", "%v (%q)", err, globalRestoreImage))
+			}
+		}
+	}
+
 	// ---- backups ----
 	seen := map[string]string{} // container\x00database -> backup name
 	for _, name := range slices.Sorted(maps.Keys(r.Backup)) {
@@ -137,6 +148,25 @@ func (l *loader) resolve() (*Config, []error) {
 			}
 		}
 
+		restoreCron := strings.TrimSpace(deref(b.RestoreCron, ""))
+		restoreImage := strings.TrimSpace(deref(b.RestoreImage, ""))
+		if restoreCron != "" {
+			if _, err := CronParser.Parse(restoreCron); err != nil {
+				add(keyErr(file, p+"restore_cron", "invalid cron expression %q: %v", restoreCron, err))
+			}
+		}
+		if restoreImage != "" {
+			if err := checkImage(restoreImage); err != nil {
+				add(keyErr(file, p+"restore_image", "%v (%q)", err, restoreImage))
+			}
+		}
+		if restoreImage == "" {
+			restoreImage = globalRestoreImage
+		}
+		if restoreCron != "" && restoreImage == "" {
+			add(keyErr(file, p+"restore_image", "required when restore_cron is set (set [restore].restore_image or override it here)"))
+		}
+
 		br := b.restic()
 		bc := domain.BackupConfig{
 			Name: name, Cron: b.Cron, Container: b.Container, Database: b.Database,
@@ -145,6 +175,9 @@ func (l *loader) resolve() (*Config, []error) {
 			Port:      deref(b.Port, 5432),
 			Roles:     deref(b.Roles, false),
 			ResticTag: deref(b.ResticTag, name),
+
+			RestoreCron:  restoreCron,
+			RestoreImage: restoreImage,
 			Restic: domain.ResticConfig{
 				Repository:  firstSet(br.Repository, gr.Repository),
 				Password:    domain.Secret(firstSet(br.Password, gr.Password)),

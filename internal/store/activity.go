@@ -20,7 +20,7 @@ func NewActivityStore(db *sql.DB) *ActivityStore { return &ActivityStore{db: db}
 
 var _ domain.ActivityRepository = (*ActivityStore)(nil)
 
-const actCols = `id, backup_name, database_name, triggered_by, status, started_at, finished_at, error, log_path`
+const actCols = `id, backup_name, database_name, triggered_by, status, started_at, finished_at, error, log_path, kind`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -28,9 +28,10 @@ func scanActivity(s scanner) (domain.Activity, error) {
 	var (
 		a                       domain.Activity
 		id, trig, status, start string
+		kind                    string
 		fin, errMsg             sql.NullString
 	)
-	if err := s.Scan(&id, &a.BackupName, &a.Database, &trig, &status, &start, &fin, &errMsg, &a.LogPath); err != nil {
+	if err := s.Scan(&id, &a.BackupName, &a.Database, &trig, &status, &start, &fin, &errMsg, &a.LogPath, &kind); err != nil {
 		return a, err
 	}
 	var err error
@@ -38,6 +39,7 @@ func scanActivity(s scanner) (domain.Activity, error) {
 		return a, err
 	}
 	a.TriggeredBy, a.Status = domain.Trigger(trig), domain.Status(status)
+	a.Kind = domain.ActivityKind(kind)
 	if a.StartedAt, err = parseTime(start); err != nil {
 		return a, err
 	}
@@ -61,9 +63,9 @@ func (s *ActivityStore) Create(ctx context.Context, a *domain.Activity) error {
 		errMsg = sql.NullString{String: a.Error, Valid: true}
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO activities (`+actCols+`) VALUES (?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO activities (`+actCols+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
 		a.ID.String(), a.BackupName, a.Database, string(a.TriggeredBy), string(a.Status),
-		fmtTime(a.StartedAt), fin, errMsg, a.LogPath)
+		fmtTime(a.StartedAt), fin, errMsg, a.LogPath, string(a.EffectiveKind()))
 	return err
 }
 
@@ -134,7 +136,7 @@ func (s *ActivityStore) LastByBackup(ctx context.Context, names []string) (map[s
 	ph := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
 	list, err := s.query(ctx, `SELECT `+actCols+` FROM (
 		SELECT *, ROW_NUMBER() OVER (PARTITION BY backup_name ORDER BY started_at DESC) AS rn
-		FROM activities WHERE backup_name IN (`+ph+`)) WHERE rn=1`, args...)
+		FROM activities WHERE kind='backup' AND backup_name IN (`+ph+`)) WHERE rn=1`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +158,7 @@ func (s *ActivityStore) LastSuccessByBackup(ctx context.Context, names []string)
 	ph := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT backup_name, MAX(finished_at) FROM activities
-		 WHERE backup_name IN (`+ph+`) AND status='success' AND finished_at IS NOT NULL
+		 WHERE kind='backup' AND backup_name IN (`+ph+`) AND status='success' AND finished_at IS NOT NULL
 		 GROUP BY backup_name`, args...)
 	if err != nil {
 		return nil, err

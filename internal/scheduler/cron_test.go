@@ -125,3 +125,54 @@ func TestMaintenanceScheduleFires(t *testing.T) {
 		t.Fatal("maintenance schedule not removed")
 	}
 }
+
+type fakeRestorer struct{ ch chan string }
+
+func (f fakeRestorer) TestRestore(_ context.Context, name string, by domain.Trigger) (*domain.Activity, error) {
+	if by != domain.TriggerSchedule {
+		return nil, domain.ErrRestoreInvalid
+	}
+	f.ch <- name
+	return nil, nil
+}
+func (f fakeRestorer) RestoreToContainer(context.Context, string, domain.Trigger, domain.RestoreRequest) (*domain.Activity, error) {
+	return nil, nil
+}
+func (f fakeRestorer) RestoreSnapshots(context.Context, string) ([]domain.RestoreSnapshot, error) {
+	return nil, nil
+}
+
+func TestScheduledTestRestoreFiresAndReloads(t *testing.T) {
+	bk := []domain.BackupConfig{{Name: "x", Cron: "@daily", RestoreCron: "@every 1s", RestoreImage: "pg18"}}
+	s, err := New(time.UTC, bk, countRunner{}, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := fakeRestorer{ch: make(chan string, 4)}
+	s.SetRestorer(r)
+	if err := s.Reload(bk, domain.MaintenanceConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	s.Start()
+	defer s.Stop(context.Background())
+
+	select {
+	case got := <-r.ch:
+		if got != "x" {
+			t.Fatalf("got %q", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("restore cron did not fire")
+	}
+
+	// Removing restore_cron unregisters the schedule.
+	if err := s.Reload([]domain.BackupConfig{{Name: "x", Cron: "@daily"}}, domain.MaintenanceConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.tests) != 0 {
+		t.Fatalf("test restore schedule not removed: %v", s.tests)
+	}
+	if err := s.Reload([]domain.BackupConfig{{Name: "x", Cron: "@daily", RestoreCron: "nope"}}, domain.MaintenanceConfig{}); err == nil {
+		t.Fatal("invalid restore_cron must be rejected")
+	}
+}

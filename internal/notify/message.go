@@ -28,8 +28,8 @@ func formatFailure(e domain.NotifyEvent, loc *time.Location) string {
 		return assemble(head, e.LogTail)
 	}
 	head := fmt.Sprintf(
-		"❌ Backup FAILED: %s\nDatabase:  %s (container %s)\nStarted:   %s\nDuration:  %s\nTrigger:   %s\nPhase/Err: %s\nActivity:  %s",
-		e.Backup.Name, a.Database, e.Backup.Container,
+		"❌ %s FAILED: %s\nDatabase:  %s (container %s)\nStarted:   %s\nDuration:  %s\nTrigger:   %s\nPhase/Err: %s\nActivity:  %s",
+		a.EffectiveKind().Label(), e.Backup.Name, a.Database, e.Backup.Container,
 		a.StartedAt.In(loc).Format(timeLayout), dur, a.TriggeredBy, a.Error, a.ID)
 	return assemble(head, e.LogTail)
 }

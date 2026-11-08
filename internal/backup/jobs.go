@@ -131,3 +131,12 @@ func (t *JobTracker) Subscribe() (events.JobSnapshot, <-chan events.JobEvent, fu
 	ch, cancel := t.hub.Subscribe(nil)
 	return events.JobSnapshot{Jobs: t.listLocked(), Seq: t.seq}, ch, cancel
 }
+// Current returns the job of the project, announced or not.
+func (t *JobTracker) Current(name string) (domain.Job, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if tj, ok := t.jobs[name]; ok {
+		return tj.job, true
+	}
+	return domain.Job{}, false
+}

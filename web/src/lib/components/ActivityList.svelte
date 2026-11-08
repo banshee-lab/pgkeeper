@@ -37,6 +37,9 @@
 								<StatusBullet status={activity.status} />
 								<div class="min-w-0">
 									<div class="flex items-center gap-2">
+										{#if activity.kind && activity.kind !== 'backup'}
+											<span class="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-[10px] text-on-surface">{activity.label ?? 'Restore'}</span>
+										{/if}
 										<span class="font-mono text-xs text-on-surface-muted">{statusLabel(activity.status)}</span>
 										{#if activity.status === 'running'}
 											<span class="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] text-primary">Running</span>

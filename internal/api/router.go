@@ -80,6 +80,9 @@ func NewRouter(h *Handler) http.Handler {
 			r.Get("/api/v1/repositories/{id}/snapshots/{snapshot}/download", h.DownloadSnapshotFile)
 			// R-12: run mutates state (starts a job); require same-origin.
 			r.With(requireSameOrigin).Post("/api/v1/backups/{name}/run", h.RunBackup)
+			r.Get("/api/v1/backups/{name}/restore/snapshots", h.ListRestoreSnapshots)
+			r.With(requireSameOrigin).Post("/api/v1/backups/{name}/restore/test", h.RunTestRestore)
+			r.With(requireSameOrigin).Post("/api/v1/backups/{name}/restore/container", h.RunContainerRestore)
 			r.Get("/api/v1/activities", h.ListActivities)
 			r.Get("/api/v1/activities/{id}", h.GetActivity)
 			r.Get("/api/v1/activities/{id}/log", h.GetActivityLog)

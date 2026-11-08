@@ -1,11 +1,24 @@
 export type ActivityStatus = 'running' | 'success' | 'error';
 export type Trigger = 'schedule' | 'manual';
-export type Phase = 'queued' | 'dump' | 'roles' | 'restic' | 'cleanup';
+export type Phase =
+	| 'queued'
+	| 'dump'
+	| 'roles'
+	| 'restic'
+	| 'cleanup'
+	| 'snapshot'
+	| 'provision'
+	| 'restore';
+export type ActivityKind = 'backup' | 'test_restore' | 'restore';
 
 export interface Activity {
 	id: string;
 	backup_name: string;
 	database: string;
+	/** Absent in older payloads; treat as 'backup'. */
+	kind?: ActivityKind;
+	/** 'Backup' | 'Test Restore' | 'Container Restore' */
+	label?: string;
 	triggered_by: Trigger;
 	status: ActivityStatus;
 	started_at: string;
@@ -42,12 +55,28 @@ export interface Backup {
 	host: string;
 	port: number;
 	roles: boolean;
+	restore_cron?: string;
+	restore_image?: string;
 	restic: ResticView;
 	running: boolean;
 	next_run: string | null;
 	last_success_at: string | null;
 	last_activity: Activity | null;
 	latest_snapshot: Snapshot | null;
+}
+
+export interface RestoreSnapshot {
+	id: string;
+	short_id: string;
+	timestamp: string;
+	has_roles: boolean;
+}
+
+export interface ContainerRestoreRequest {
+	snapshot_id: string;
+	container: string;
+	database: string;
+	include_roles: boolean;
 }
 
 export interface Job {

@@ -30,6 +30,12 @@ type Deps struct {
 	Exec       domain.Executor
 	Restic     domain.ResticClient
 	Notifier   domain.Notifier
+
+	// Restore support (optional): without them restores fail with
+	// domain.ErrRestoreUnavailable and backups are unaffected.
+	RestoreExec domain.RestoreExecutor
+	Inspector   domain.RepositoryInspector // lists and downloads restic snapshots
+
 	JobHub     *events.Hub[events.JobEvent]
 	LogHub     *events.Hub[logstore.LogLine]
 	Logger     *slog.Logger
@@ -118,7 +124,19 @@ func (r *Runner) Run(ctx context.Context, name string, by domain.Trigger) (*doma
 	if !ok {
 		return nil, domain.ErrBackupUnknown
 	}
+	return r.start(ctx, cfg, by, domain.KindBackup, func(ctx context.Context, act domain.Activity, lg execLog) error {
+		return r.runPhases(ctx, cfg, act, lg)
+	})
+}
 
+// workFunc is the body of an execution: the backup or restore phases.
+type workFunc func(ctx context.Context, act domain.Activity, lg execLog) error
+
+// start registers an execution of the given kind and runs work in the
+// background. A project runs one backup or restore at a time (the job tracker
+// is keyed by project): ErrBackupRunning / ErrRestoreRunning name what holds it.
+func (r *Runner) start(ctx context.Context, cfg domain.BackupConfig, by domain.Trigger, kind domain.ActivityKind, work workFunc) (*domain.Activity, error) {
+	name := cfg.Name
 	r.mu.Lock()
 	if r.stopping {
 		r.mu.Unlock()
@@ -130,14 +148,17 @@ func (r *Runner) Run(ctx context.Context, name string, by domain.Trigger) (*doma
 	id := r.NewID()
 	now := r.Clock().UTC()
 	act := domain.Activity{
-		ID: id, BackupName: name, Database: cfg.Database, TriggeredBy: by,
+		ID: id, BackupName: name, Database: cfg.Database, Kind: kind, TriggeredBy: by,
 		Status: domain.StatusRunning, StartedAt: now,
 		LogPath: filepath.Join(r.Global.LogPath, safeName(cfg.Database), id.String()+".log"),
 	}
-	job := domain.Job{ActivityID: id, BackupName: name, Database: cfg.Database, TriggeredBy: by, StartedAt: now}
+	job := domain.Job{ActivityID: id, BackupName: name, Database: cfg.Database, Kind: kind, TriggeredBy: by, StartedAt: now}
 
 	if !r.jobs.TryStart(job) {
 		r.wg.Done()
+		if cur, ok := r.jobs.Current(name); ok && cur.Kind.IsRestore() {
+			return nil, domain.ErrRestoreRunning
+		}
 		return nil, domain.ErrBackupRunning
 	}
 	if err := r.Activities.Create(ctx, &act); err != nil {
@@ -145,18 +166,28 @@ func (r *Runner) Run(ctx context.Context, name string, by domain.Trigger) (*doma
 		r.wg.Done()
 		return nil, fmt.Errorf("create activity: %w", err)
 	}
-	r.Logger.Info("backup run started",
+	noun := runNoun(kind)
+	r.Logger.Info(noun+" run started",
 		"activity", act.ID,
 		"backup", cfg.Name,
 		"database", cfg.Database,
+		"kind", kind,
 		"trigger", by,
 		"log_path", act.LogPath)
 	// The row is persisted: now make the job visible and publish job.started.
 	r.jobs.Announce(name, act)
 
-	go r.execute(cfg, act)
+	go r.execute(cfg, act, work)
 	out := act
 	return &out, nil
+}
+
+// runNoun is the word used in log messages: "backup" or "restore".
+func runNoun(kind domain.ActivityKind) string {
+	if kind.IsRestore() {
+		return "restore"
+	}
+	return "backup"
 }
 
 type execLog interface {
@@ -180,7 +211,7 @@ type redactExecLog struct {
 func (l *redactExecLog) Write(p []byte) (int, error)            { return l.stderr.Write(p) }
 func (l *redactExecLog) Logf(level, format string, args ...any) { l.base.Logf(level, format, args...) }
 
-func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
+func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity, work workFunc) {
 	defer r.wg.Done()
 	defer r.jobs.Release(cfg.Name, act.ID) // safety net; idempotent, never touches a newer run
 	ctx := r.ctx
@@ -208,8 +239,9 @@ func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
 	}
 	defer closeLog()
 
-	lg.Logf("INFO", "execution %s started (backup=%s database=%s trigger=%s)", act.ID, cfg.Name, cfg.Database, act.TriggeredBy)
-	runErr := r.runPhases(ctx, cfg, act, lg)
+	noun := runNoun(act.Kind)
+	lg.Logf("INFO", "execution %s started (backup=%s database=%s trigger=%s kind=%s)", act.ID, cfg.Name, cfg.Database, act.TriggeredBy, act.EffectiveKind())
+	runErr := work(ctx, act, lg)
 
 	finished := r.Clock().UTC()
 	act.FinishedAt = &finished
@@ -223,7 +255,7 @@ func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
 	}
 	if runErr != nil {
 		lg.Logf("ERROR", "execution finished: status=error err=%s", act.Error)
-		r.Logger.Error("backup run failed",
+		r.Logger.Error(noun+" run failed",
 			"activity", act.ID,
 			"backup", cfg.Name,
 			"database", cfg.Database,
@@ -233,7 +265,7 @@ func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity) {
 			"err", act.Error)
 	} else {
 		lg.Logf("INFO", "execution finished: status=success elapsed=%s", finished.Sub(act.StartedAt).Round(time.Millisecond))
-		r.Logger.Info("backup run completed",
+		r.Logger.Info(noun+" run completed",
 			"activity", act.ID,
 			"backup", cfg.Name,
 			"database", cfg.Database,

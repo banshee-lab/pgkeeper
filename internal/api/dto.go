@@ -11,6 +11,8 @@ type ActivityDTO struct {
 	ID          string  `json:"id"`
 	BackupName  string  `json:"backup_name"`
 	Database    string  `json:"database"`
+	Kind        string  `json:"kind"`  // backup | test_restore | restore
+	Label       string  `json:"label"` // Backup | Test Restore | Container Restore
 	TriggeredBy string  `json:"triggered_by"`
 	Status      string  `json:"status"`
 	StartedAt   string  `json:"started_at"`
@@ -39,6 +41,8 @@ type BackupDTO struct {
 	Host          string       `json:"host"`
 	Port          int          `json:"port"`
 	Roles         bool         `json:"roles"`
+	RestoreCron   string       `json:"restore_cron"`  // scheduled test restores; empty = disabled
+	RestoreImage  string       `json:"restore_image"` // image of the ephemeral test-restore container
 	Restic        ResticDTO    `json:"restic"`
 	Running       bool         `json:"running"`
 	NextRun       *string      `json:"next_run"`
@@ -69,6 +73,7 @@ type JobDTO struct {
 	ActivityID  string `json:"activity_id"`
 	BackupName  string `json:"backup_name"`
 	Database    string `json:"database"`
+	Kind        string `json:"kind"`
 	TriggeredBy string `json:"triggered_by"`
 	Status      string `json:"status"` // always "running"
 	Phase       string `json:"phase"`
@@ -134,6 +139,8 @@ func ToActivityDTO(a domain.Activity) ActivityDTO {
 		ID:          a.ID.String(),
 		BackupName:  a.BackupName,
 		Database:    a.Database,
+		Kind:        string(a.EffectiveKind()),
+		Label:       a.EffectiveKind().Label(),
 		TriggeredBy: string(a.TriggeredBy),
 		Status:      string(a.Status),
 		StartedAt:   fmtTime(a.StartedAt),
@@ -172,6 +179,7 @@ func ToBackupDTO(b domain.BackupConfig, running bool, next *time.Time, last *dom
 		Name: b.Name, Cron: b.Cron, Timezone: tz,
 		Container: b.Container, Database: b.Database,
 		Username: b.Username, Host: b.Host, Port: b.Port, Roles: b.Roles,
+		RestoreCron: b.RestoreCron, RestoreImage: b.RestoreImage,
 		Restic: ResticDTO{
 			Repository:  redactRepo(b.Restic.Repository),
 			Tag:         b.ResticTag,
@@ -196,11 +204,19 @@ func ToJobDTO(j domain.Job) JobDTO {
 		ActivityID:  j.ActivityID.String(),
 		BackupName:  j.BackupName,
 		Database:    j.Database,
+		Kind:        string(kindOrBackup(j.Kind)),
 		TriggeredBy: string(j.TriggeredBy),
 		Status:      string(domain.StatusRunning),
 		Phase:       string(j.Phase),
 		StartedAt:   fmtTime(j.StartedAt),
 	}
+}
+
+func kindOrBackup(k domain.ActivityKind) domain.ActivityKind {
+	if k == "" {
+		return domain.KindBackup
+	}
+	return k
 }
 
 func ToJobDTOs(in []domain.Job) []JobDTO {

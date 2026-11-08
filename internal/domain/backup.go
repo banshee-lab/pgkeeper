@@ -17,6 +17,12 @@ type BackupConfig struct {
     ResticTag  string
     Roles      bool
     Restic     ResticConfig // already merged with global
+
+    // RestoreCron schedules automatic test restores; empty disables them.
+    RestoreCron string
+    // RestoreImage is the image of the ephemeral test-restore container: the
+    // project override, else the global [restore].restore_image.
+    RestoreImage string
 }
 
 type GlobalConfig struct {

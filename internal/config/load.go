@@ -139,6 +139,7 @@ func (l *loader) add(file string, r *raw) []error {
 	claim(l, &errs, "telegram", file, &l.merged.Telegram, r.Telegram)
 	claim(l, &errs, "auth", file, &l.merged.Auth, r.Auth)
 	claim(l, &errs, "restic", file, &l.merged.Restic, r.Restic)
+	claim(l, &errs, "restore", file, &l.merged.Restore, r.Restore)
 
 	for _, name := range slices.Sorted(maps.Keys(r.Backup)) {
 		if prev, dup := l.backupSrc[name]; dup {

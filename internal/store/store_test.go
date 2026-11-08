@@ -112,3 +112,44 @@ func TestSnapshotStoreKeepsLatestPerBackup(t *testing.T) {
 		t.Fatalf("got %+v", g)
 	}
 }
+
+func TestRestoreActivitiesDoNotAffectBackupAggregates(t *testing.T) {
+	as, _ := newDB(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Second)
+
+	b := act("b1", base)
+	if err := as.Create(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if err := as.Finish(ctx, b.ID, domain.StatusSuccess, base.Add(time.Second), ""); err != nil {
+		t.Fatal(err)
+	}
+	r := act("b1", base.Add(time.Minute))
+	r.Kind = domain.KindTestRestore
+	if err := as.Create(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if err := as.Finish(ctx, r.ID, domain.StatusSuccess, base.Add(2*time.Minute), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	last, _ := as.LastByBackup(ctx, []string{"b1"})
+	if last["b1"].ID != b.ID {
+		t.Fatalf("last backup activity = %+v, want the backup", last["b1"])
+	}
+	if last["b1"].Kind != domain.KindBackup {
+		t.Fatalf("kind = %q", last["b1"].Kind)
+	}
+	ok, _ := as.LastSuccessByBackup(ctx, []string{"b1"})
+	if !ok["b1"].Equal(base.Add(time.Second)) {
+		t.Fatalf("last success = %v, restores must not count", ok["b1"])
+	}
+	got, err := as.Get(ctx, r.ID)
+	if err != nil || got.Kind != domain.KindTestRestore {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if list, _ := as.ListByBackup(ctx, "b1", 10); len(list) != 2 {
+		t.Fatalf("activity list must include restores, got %d", len(list))
+	}
+}

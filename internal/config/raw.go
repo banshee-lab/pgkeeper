@@ -7,7 +7,13 @@ type raw struct {
 	Telegram *rawTelegram         `toml:"telegram"`
 	Auth     *rawAuth             `toml:"auth"`
 	Restic   *rawRestic           `toml:"restic"`
+	Restore  *rawRestore          `toml:"restore"`
 	Backup   map[string]rawBackup `toml:"backup"`
+}
+
+// rawRestore is the global [restore] section.
+type rawRestore struct {
+	RestoreImage *string `toml:"restore_image"`
 }
 
 type rawGlobal struct {
@@ -60,6 +66,10 @@ type rawBackup struct {
 	Host      *string `toml:"host"`
 	ResticTag *string `toml:"restic_tag"`
 	Roles     *bool   `toml:"roles"`
+
+	// Test restores: cron schedule and optional image override.
+	RestoreCron  *string `toml:"restore_cron"`
+	RestoreImage *string `toml:"restore_image"`
 
 	// Flat restic overrides (same keys as [restic]).
 	Repository  *string `toml:"repository"`
