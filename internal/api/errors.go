@@ -13,6 +13,7 @@ const (
 	CodeActivityNotFound = "activity_not_found"
 	CodeLogNotFound      = "log_not_found"
 	CodeBackupRunning    = "backup_running"
+	CodeRestoreRunning   = "restore_running"
 	CodeInternal         = "internal_error"
 	CodeNotImplemented   = "not_implemented"
 	CodeNotFound         = "not_found"

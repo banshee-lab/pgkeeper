@@ -4,12 +4,14 @@ import type {
 	ApiErrorBody,
 	Backup,
 	BackupList,
+	ContainerRestoreRequest,
 	Me,
 	Repository,
 	RepositoryActivity,
 	RepositoryNode,
 	RepositorySnapshot,
-	RepositorySnapshotStats
+	RepositorySnapshotStats,
+	RestoreSnapshot
 } from './types';
 import {
 	copyMockActivities,
@@ -228,6 +230,58 @@ export async function runBackup(name: string): Promise<Activity> {
 
 	return request<Activity>(`/api/v1/backups/${encodeURIComponent(name)}/run`, {
 		method: 'POST'
+	});
+}
+
+function mockRestoreActivity(name: string, kind: 'test_restore' | 'restore'): Activity {
+	return {
+		id: crypto.randomUUID(),
+		backup_name: name,
+		database: mockBackups.find((backup) => backup.name === name)?.database ?? name,
+		kind,
+		label: kind === 'test_restore' ? 'Test Restore' : 'Container Restore',
+		triggered_by: 'manual',
+		status: 'running',
+		started_at: new Date().toISOString(),
+		finished_at: null,
+		duration_ms: null,
+		error: null,
+		log_url: ''
+	};
+}
+
+export async function listRestoreSnapshots(name: string): Promise<RestoreSnapshot[]> {
+	if (mockEnabled) {
+		return [
+			{ id: 'bbbbbbbb22222222', short_id: 'bbbbbbbb', timestamp: new Date().toISOString(), has_roles: true },
+			{ id: 'aaaaaaaa11111111', short_id: 'aaaaaaaa', timestamp: new Date(Date.now() - 86_400_000).toISOString(), has_roles: false }
+		];
+	}
+	const result = await request<{ items: RestoreSnapshot[] }>(
+		`/api/v1/backups/${encodeURIComponent(name)}/restore/snapshots`
+	);
+	return result.items;
+}
+
+export async function startTestRestore(name: string): Promise<Activity> {
+	if (mockEnabled) {
+		const activity = mockRestoreActivity(name, 'test_restore');
+		mockActivities.unshift(activity);
+		return structuredClone(activity);
+	}
+	return request<Activity>(`/api/v1/backups/${encodeURIComponent(name)}/restore/test`, { method: 'POST' });
+}
+
+export async function startContainerRestore(name: string, body: ContainerRestoreRequest): Promise<Activity> {
+	if (mockEnabled) {
+		const activity = mockRestoreActivity(name, 'restore');
+		mockActivities.unshift(activity);
+		return structuredClone(activity);
+	}
+	return request<Activity>(`/api/v1/backups/${encodeURIComponent(name)}/restore/container`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body)
 	});
 }
 

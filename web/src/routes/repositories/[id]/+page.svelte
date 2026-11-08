@@ -34,6 +34,7 @@
 	let selectedSnapshot = $state('');
 	let currentPath = $state('');
 	let snapshotPage = $state(0);
+	let tagFilter = $state('');
 	let browserOpen = $state(false);
 	let treeLoading = $state(false);
 	let snapshotStatsLoading = $state(false);
@@ -60,9 +61,17 @@
 			? selectedSnapshotSummary
 			: null
 	);
-	let snapshotPageCount = $derived(Math.max(1, Math.ceil(snapshots.length / snapshotPageSize)));
+	// Most recent first; the tag filter is applied on the client only.
+	let sortedSnapshots = $derived(
+		[...snapshots].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+	);
+	let availableTags = $derived([...new Set(snapshots.flatMap((snapshot) => snapshot.tags))].sort());
+	let filteredSnapshots = $derived(
+		tagFilter ? sortedSnapshots.filter((snapshot) => snapshot.tags.includes(tagFilter)) : sortedSnapshots
+	);
+	let snapshotPageCount = $derived(Math.max(1, Math.ceil(filteredSnapshots.length / snapshotPageSize)));
 	let visibleSnapshots = $derived(
-		snapshots.slice(snapshotPage * snapshotPageSize, (snapshotPage + 1) * snapshotPageSize)
+		filteredSnapshots.slice(snapshotPage * snapshotPageSize, (snapshotPage + 1) * snapshotPageSize)
 	);
 
 	function updateActivities(items: RepositoryActivity[]) {
@@ -92,6 +101,7 @@
 			repository = nextRepository;
 			updateActivities(nextActivities);
 			snapshots = nextSnapshots;
+			if (tagFilter && !availableTags.includes(tagFilter)) tagFilter = '';
 			const summaries = sameRepository ? { ...snapshotSummaries } : {};
 			for (const backup of nextBackups) {
 				if (nextRepository.backups.includes(backup.name) && backup.latest_snapshot) {
@@ -113,7 +123,7 @@
 			if (!sameRepository || !snapshots.some((snapshot) => snapshot.id === selectedSnapshot)) {
 				clearSnapshotSelection();
 			}
-			const selectedIndex = snapshots.findIndex((snapshot) => snapshot.id === selectedSnapshot);
+			const selectedIndex = filteredSnapshots.findIndex((snapshot) => snapshot.id === selectedSnapshot);
 			if (!sameRepository) snapshotPage = 0;
 			else if (selectedIndex >= 0) snapshotPage = Math.floor(selectedIndex / snapshotPageSize);
 			else snapshotPage = Math.min(snapshotPage, snapshotPageCount - 1);
@@ -229,6 +239,11 @@
 		clearSnapshotSelection();
 	}
 
+	function changeTagFilter() {
+		snapshotPage = 0;
+		clearSnapshotSelection();
+	}
+
 	function clearSnapshotSelection() {
 		selectedSnapshot = '';
 		resetSnapshotBrowser();
@@ -339,7 +354,25 @@
 			<section class="panel"><h2 class="font-semibold">Projects using this repository</h2><p class="mt-2 text-sm text-on-surface-muted">{repository.backups.join(', ')}</p></section>
 		{/if}
 		<section class="panel">
-			<h2 class="font-semibold">Snapshots</h2>
+			<div class="flex flex-wrap items-center justify-between gap-3">
+				<h2 class="font-semibold">Snapshots</h2>
+				{#if availableTags.length}
+					<label class="flex items-center gap-2 text-xs text-on-surface-muted">
+						Tag
+						<select
+							class="rounded border border-outline bg-surface px-2 py-1 font-mono text-xs text-on-surface"
+							aria-label="Filter snapshots by tag"
+							bind:value={tagFilter}
+							onchange={changeTagFilter}
+						>
+							<option value="">All tags</option>
+							{#each availableTags as tag (tag)}
+								<option value={tag}>{tag}</option>
+							{/each}
+						</select>
+					</label>
+				{/if}
+			</div>
 			{#if snapshots.length === 0}<p class="mt-3 text-sm text-on-surface-muted">No snapshots found.</p>{:else}
 				<div class="mt-3 overflow-x-auto">
 					<table class="w-full min-w-[36rem] border-collapse text-left text-sm">
@@ -352,6 +385,9 @@
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-outline">
+							{#if visibleSnapshots.length === 0}
+								<tr><td colspan="4" class="px-3 py-3 text-on-surface-muted">No snapshots with this tag.</td></tr>
+							{/if}
 							{#each visibleSnapshots as snapshot (snapshot.id)}
 								<tr class={selectedSnapshot === snapshot.id ? 'bg-primary/10' : ''}>
 									<td class="px-3 py-2">
@@ -370,7 +406,7 @@
 					</table>
 				</div>
 				<div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-					<p class="text-on-surface-muted">Page {snapshotPage + 1} of {snapshotPageCount} · {snapshots.length} snapshots</p>
+					<p class="text-on-surface-muted">Page {snapshotPage + 1} of {snapshotPageCount} · {filteredSnapshots.length} snapshots</p>
 					<div class="flex gap-2">
 						<Button variant="secondary" disabled={snapshotPage === 0} onclick={() => changeSnapshotPage(snapshotPage - 1)}>Previous</Button>
 						<Button variant="secondary" disabled={snapshotPage >= snapshotPageCount - 1} onclick={() => changeSnapshotPage(snapshotPage + 1)}>Next</Button>

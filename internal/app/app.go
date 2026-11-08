@@ -58,6 +58,14 @@ func Run(ctx context.Context, cfg *config.Config, configPath string, notifier do
 		log.Warn("docker check failed (continuing)", "err", err)
 	}
 	cancel()
+	// Test-restore containers left behind by a crashed run are removed.
+	octx, ocancel := context.WithTimeout(ctx, 15*time.Second)
+	if n, err := docker.CleanupOrphans(octx); err != nil {
+		log.Warn("cleanup of leftover restore containers failed (continuing)", "err", err)
+	} else if n > 0 {
+		log.Info("removed leftover restore containers", "count", n)
+	}
+	ocancel()
 
 	resticCLI := restic.New(cfg.Global.TempPath)
 	vctx, vcancel := context.WithTimeout(ctx, 5*time.Second)
@@ -82,6 +90,10 @@ func Run(ctx context.Context, cfg *config.Config, configPath string, notifier do
 		Exec:       docker,
 		Restic:     resticCLI,
 		Notifier:   notifier,
+
+		RestoreExec: docker,
+		Inspector:   resticCLI,
+
 		JobHub:     jobHub,
 		LogHub:     logHub,
 		Logger:     log,
@@ -126,6 +138,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string, notifier do
 		return err
 	}
 	sched.SetMaintenance(maint)
+	sched.SetRestorer(runner)
 	if err := sched.Reload(cfg.Backups, cfg.Maintenance); err != nil {
 		return err
 	}
@@ -148,6 +161,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string, notifier do
 		Snapshots:  snapshots,
 		Catalog:    holder,
 		Runner:     runner,
+		Restorer:   runner,
 		Scheduler:  sched,
 		JobHub:     jobHub,
 		LogHub:     logHub,

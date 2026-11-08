@@ -171,6 +171,107 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/backups/{name}/restore/snapshots:
+    parameters:
+      - $ref: '#/components/parameters/BackupName'
+    get:
+      tags: [backups, restore]
+      summary: Snapshots of the backup that can be restored (newest first)
+      description: >
+        Lists the restic snapshots written by the backup that contain its
+        database dump. Used by the "Restore to Container" dialog.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/RestoreSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: Restore is unavailable or the server is shutting down
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/backups/{name}/restore/test:
+    parameters:
+      - $ref: '#/components/parameters/BackupName'
+    post:
+      tags: [backups, restore]
+      summary: Start a test restore into an ephemeral container
+      description: >
+        Restores the latest snapshot into a throw-away PostgreSQL container
+        (image: the backup's `restore_image`, else the global
+        `[restore].restore_image`). The container is removed when the restore
+        ends, whatever the outcome. The execution is an activity of kind
+        `test_restore`; its log holds the full console output. Requires a
+        same-origin Origin or Referer header.
+      responses:
+        '202':
+          description: Accepted; execution started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Activity' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: A backup or restore of this backup is already running
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Restore is unavailable or the server is shutting down
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/backups/{name}/restore/container:
+    parameters:
+      - $ref: '#/components/parameters/BackupName'
+    post:
+      tags: [backups, restore]
+      summary: Restore a snapshot into a live / custom container
+      description: >
+        Drops and recreates the target database, then loads the snapshot's
+        dump into it. With `include_roles` the roles dump is applied first;
+        roles that already exist are overwritten (attributes and passwords
+        updated) and each overwrite is logged. The execution is an activity
+        of kind `restore`. Requires a same-origin Origin or Referer header.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContainerRestoreRequest' }
+      responses:
+        '202':
+          description: Accepted; execution started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Activity' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: A backup or restore of this backup is already running
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Restore is unavailable or the server is shutting down
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/repositories:
     get:
       tags: [repositories]
@@ -594,7 +695,7 @@ components:
           properties:
             code:
               type: string
-              enum: [invalid_request, unauthenticated, backup_not_found, activity_not_found, log_not_found, backup_running, internal_error, not_implemented, not_found, method_not_allowed, unavailable, rate_limited]
+              enum: [invalid_request, unauthenticated, backup_not_found, activity_not_found, log_not_found, backup_running, restore_running, internal_error, not_implemented, not_found, method_not_allowed, unavailable, rate_limited]
             message: { type: string }
 
     ActivityStatus:
@@ -672,18 +773,46 @@ components:
 
     Phase:
       type: string
-      enum: [queued, dump, roles, restic, cleanup]
+      enum: [queued, dump, roles, restic, cleanup, snapshot, provision, restore]
       description: |
         `queued` means the run finished its dumps and waits for another backup
-        that is using the same restic repository.
+        that is using the same restic repository. `snapshot`, `provision` and
+        `restore` are restore phases (resolve the snapshot, start the
+        ephemeral container, load the dump); restores also use `queued`,
+        `restic` (download from the repository), `roles` and `cleanup`.
+
+    ActivityKind:
+      type: string
+      enum: [backup, test_restore, restore]
+
+    RestoreSnapshot:
+      type: object
+      required: [id, short_id, timestamp, has_roles]
+      properties:
+        id: { type: string }
+        short_id: { type: string }
+        timestamp: { type: string, format: date-time }
+        has_roles: { type: boolean, description: The snapshot contains a roles dump }
+
+    ContainerRestoreRequest:
+      type: object
+      required: [snapshot_id]
+      additionalProperties: false
+      properties:
+        snapshot_id: { type: string, description: Full or short restic snapshot ID of this backup }
+        container: { type: string, description: Target container; defaults to the backup's container }
+        database: { type: string, description: Target database; defaults to the backup's database }
+        include_roles: { type: boolean, default: false }
 
     Activity:
       type: object
-      required: [id, backup_name, database, triggered_by, status, started_at, finished_at, duration_ms, error, log_url]
+      required: [id, backup_name, database, kind, label, triggered_by, status, started_at, finished_at, duration_ms, error, log_url]
       properties:
         id: { type: string, format: uuid }
         backup_name: { type: string }
         database: { type: string }
+        kind: { $ref: '#/components/schemas/ActivityKind' }
+        label: { type: string, description: 'Backup, Test Restore or Container Restore' }
         triggered_by: { $ref: '#/components/schemas/Trigger' }
         status: { $ref: '#/components/schemas/ActivityStatus' }
         started_at: { type: string, format: date-time }
@@ -728,6 +857,8 @@ components:
         host: { type: string }
         port: { type: integer }
         roles: { type: boolean }
+        restore_cron: { type: string, description: 'Cron of the scheduled test restores; empty when disabled' }
+        restore_image: { type: string, description: 'Image of the ephemeral test-restore container (project override, else the global restore_image)' }
         restic: { $ref: '#/components/schemas/ResticView' }
         running: { type: boolean }
         next_run: { type: string, format: date-time, nullable: true }
@@ -735,7 +866,7 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: RFC3339 time of the most recent successful activity, or null if never succeeded.
+          description: RFC3339 time of the most recent successful backup (restores do not count), or null if never succeeded.
         last_activity:
           nullable: true
           allOf:
@@ -753,6 +884,7 @@ components:
         activity_id: { type: string, format: uuid }
         backup_name: { type: string }
         database: { type: string }
+        kind: { $ref: '#/components/schemas/ActivityKind' }
         triggered_by: { $ref: '#/components/schemas/Trigger' }
         status: { type: string, enum: [running] }
         phase: { $ref: '#/components/schemas/Phase' }

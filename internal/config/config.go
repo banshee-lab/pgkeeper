@@ -78,9 +78,9 @@ func (c *Config) LogSafe() string {
 		m.PruneCron, m.CheckCron, m.ReadPercent())
 	fmt.Fprintf(&b, "backups: %d\n", len(c.Backups))
 	for _, bc := range c.Backups {
-		fmt.Fprintf(&b, "  - %s: cron=%q container=%s database=%s tag=%s roles=%t repo=%s\n",
+		fmt.Fprintf(&b, "  - %s: cron=%q container=%s database=%s tag=%s roles=%t repo=%s restore_cron=%q restore_image=%q\n",
 			bc.Name, bc.Cron, bc.Container, bc.Database, bc.ResticTag, bc.Roles,
-			RedactRepository(bc.Restic.Repository))
+			RedactRepository(bc.Restic.Repository), bc.RestoreCron, bc.RestoreImage)
 	}
 	return b.String()
 }

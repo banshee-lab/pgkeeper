@@ -10,6 +10,7 @@ type Activity struct {
     ID          uuid.UUID
     BackupName  string
     Database    string
+    Kind        ActivityKind // empty means KindBackup
     TriggeredBy Trigger
     Status      Status
     StartedAt   time.Time
@@ -26,10 +27,19 @@ func (a Activity) Duration() *time.Duration {
 	return &d
 }
 
+// EffectiveKind returns Kind, defaulting to KindBackup.
+func (a Activity) EffectiveKind() ActivityKind {
+    if a.Kind == "" {
+        return KindBackup
+    }
+    return a.Kind
+}
+
 type Job struct { // in-memory only
     ActivityID  uuid.UUID
     BackupName  string
     Database    string
+    Kind        ActivityKind // empty means KindBackup
     TriggeredBy Trigger
     Phase       Phase
     StartedAt   time.Time
