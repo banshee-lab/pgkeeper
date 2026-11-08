@@ -116,7 +116,7 @@ credentials so snapshots are stored independently of this host.
 Configuration is strict TOML. Environment variables are expanded in TOML
 string values using `${NAME}` (required) or `${NAME:-default}` (fallback).
 See [the full example](examples/pgkeeper.toml), [environment variable
-details](docs/environment.md), and the [API contract](docs/api.md).
+details](docs/environment.md), and the [API contract](docs/openapi.yaml).
 
 ## Development
 

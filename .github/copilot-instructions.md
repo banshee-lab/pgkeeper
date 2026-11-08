@@ -23,5 +23,5 @@ The backup flow is shared by scheduled and manual triggers: `scheduler` or an AP
 - Config is TOML decoded strictly: unknown keys are errors. `config.Load` handles environment expansion, includes, defaults, and validation; preserve that single resolution path and update `examples/pgkeeper.toml` when changing the supported config.
 - Launch external programs with `exec.CommandContext` and argument slices, never through a shell. Keep secrets out of command arguments and logs; use `domain.Secret` and existing redaction helpers.
 - SQLite schema changes belong in new Goose SQL migrations under `migrations/`; those files are embedded by `migrations/embed.go` and applied by `store.Migrate`.
-- When changing API behavior or payloads, keep the human-readable contract in `docs/api.md` and machine-readable `docs/openapi.yaml` aligned. API JSON uses `snake_case` and the documented error envelope.
+- When changing API behavior or payloads, keep the API contract `docs/openapi.yaml` aligned. API JSON uses `snake_case` and the documented error envelope.
 - Restic integration tests use the `integration` build tag; ordinary `go test ./...` excludes them.

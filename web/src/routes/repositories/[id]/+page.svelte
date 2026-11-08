@@ -347,8 +347,8 @@
 		<section class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 			<div class="panel"><p class="text-xs text-on-surface-muted">Stored size</p><p class="mt-2 font-mono text-xl">{formatSize(repository.total_size ?? 0)}</p></div>
 			<div class="panel"><p class="text-xs text-on-surface-muted">Snapshots</p><p class="mt-2 font-mono text-xl">{repository.snapshot_count ?? 0}</p></div>
-			<div class="panel"><p class="text-xs text-on-surface-muted">Next prune</p><p class="mt-2 text-sm">{repository.next_prune ? new Date(repository.next_prune).toLocaleString() : 'Not scheduled'}</p></div>
-			<div class="panel"><p class="text-xs text-on-surface-muted">Next check</p><p class="mt-2 text-sm">{repository.next_check ? new Date(repository.next_check).toLocaleString() : 'Not scheduled'}</p></div>
+			<div class="panel"><p class="text-xs text-on-surface-muted">Next prune</p><p class="mt-2 text-sm">{repository.next_prune ? formatDateTime(repository.next_prune) : 'Not scheduled'}</p></div>
+			<div class="panel"><p class="text-xs text-on-surface-muted">Next check</p><p class="mt-2 text-sm">{repository.next_check ? formatDateTime(repository.next_check) : 'Not scheduled'}</p></div>
 		</section>
 		{#if repository.backups.length}
 			<section class="panel"><h2 class="font-semibold">Projects using this repository</h2><p class="mt-2 text-sm text-on-surface-muted">{repository.backups.join(', ')}</p></section>
@@ -397,7 +397,7 @@
 											onclick={() => selectSnapshot(snapshot)}
 										>{snapshot.short_id || snapshot.id.slice(0, 8)}</button>
 									</td>
-									<td class="whitespace-nowrap px-3 py-2">{new Date(snapshot.time).toLocaleString()}</td>
+									<td class="whitespace-nowrap px-3 py-2">{formatDateTime(snapshot.time)}</td>
 									<td class="px-3 py-2">{snapshot.hostname || '—'}</td>
 									<td class="px-3 py-2">{snapshot.tags.length ? snapshot.tags.join(', ') : '—'}</td>
 								</tr>
