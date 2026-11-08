@@ -87,7 +87,7 @@ func (s *Cron) SetMaintenance(m domain.MaintenanceRunner) {
 }
 
 // SetRestorer sets the runner behind the scheduled test restores
-// (restore_cron). Call Reload afterwards to register them.
+// (restore-cron). Call Reload afterwards to register them.
 func (s *Cron) SetRestorer(r domain.RestoreRunner) {
 	s.mu.Lock()
 	s.restore = r
@@ -97,7 +97,7 @@ func (s *Cron) SetRestorer(r domain.RestoreRunner) {
 func (s *Cron) addTestRestore(name, spec string) error {
 	id, err := s.c.AddFunc(spec, func() { s.restoreTick(name) })
 	if err != nil {
-		return fmt.Errorf("backup %q: invalid restore_cron %q: %w", name, spec, err)
+		return fmt.Errorf("backup %q: invalid restore-cron %q: %w", name, spec, err)
 	}
 	s.tests[name] = entry{id: id, spec: spec}
 	s.log.Info("test restore schedule registered", "backup", name, "cron", spec)
@@ -115,7 +115,7 @@ func (s *Cron) Reload(backups []domain.BackupConfig, mc domain.MaintenanceConfig
 		}
 		if b.RestoreCron != "" {
 			if _, err := config.CronParser.Parse(b.RestoreCron); err != nil {
-				return fmt.Errorf("backup %q: invalid restore_cron %q: %w", b.Name, b.RestoreCron, err)
+				return fmt.Errorf("backup %q: invalid restore-cron %q: %w", b.Name, b.RestoreCron, err)
 			}
 		}
 	}

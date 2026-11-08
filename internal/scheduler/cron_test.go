@@ -51,6 +51,7 @@ func TestFiresAndNextRun(t *testing.T) {
 		t.Fatal("cron did not fire")
 	}
 }
+
 type fakeMaint struct{ ch chan domain.MaintenanceKind }
 
 func (f fakeMaint) Trigger(k domain.MaintenanceKind) error { f.ch <- k; return nil }
@@ -165,7 +166,7 @@ func TestScheduledTestRestoreFiresAndReloads(t *testing.T) {
 		t.Fatal("restore cron did not fire")
 	}
 
-	// Removing restore_cron unregisters the schedule.
+	// Removing restore-cron unregisters the schedule.
 	if err := s.Reload([]domain.BackupConfig{{Name: "x", Cron: "@daily"}}, domain.MaintenanceConfig{}); err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +174,6 @@ func TestScheduledTestRestoreFiresAndReloads(t *testing.T) {
 		t.Fatalf("test restore schedule not removed: %v", s.tests)
 	}
 	if err := s.Reload([]domain.BackupConfig{{Name: "x", Cron: "@daily", RestoreCron: "nope"}}, domain.MaintenanceConfig{}); err == nil {
-		t.Fatal("invalid restore_cron must be rejected")
+		t.Fatal("invalid restore-cron must be rejected")
 	}
 }

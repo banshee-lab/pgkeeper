@@ -1,20 +1,20 @@
 [global]
 timezone  = "America/Argentina/Buenos_Aires"
 include   = ["conf/*.toml"]
-temp_path = "${PGKEEPER_TEMP_PATH:-/var/tmp}"
-log_path  = "${PGKEEPER_LOG_PATH:-/var/log}"
+temp-path = "${PGKEEPER_TEMP_PATH:-/var/tmp}"
+log-path  = "${PGKEEPER_LOG_PATH:-/var/log}"
 listen    = ":8080"
-db_path   = "${PGKEEPER_DB_PATH:-/var/lib/pgkeeper/pgkeeper.db}"
+db-path   = "${PGKEEPER_DB_PATH:-/var/lib/pgkeeper/pgkeeper.db}"
 
 [telegram]
-bot_token = "${TG_BOT_TOKEN}"
-chat_id   = "${TG_CHAT_ID}"
+bot-token = "${TG_BOT_TOKEN}"
+chat-id   = "${TG_CHAT_ID}"
 
 [auth]
 issuer       = "https://idp.example.com/realms/x"
-client_id    = "pgkeeper"
+client-id    = "pgkeeper"
 secret       = "${OIDC_SECRET}"
-redirect_url = "https://pgkeeper.example.com/auth/callback"
+redirect-url = "https://pgkeeper.example.com/auth/callback"
 
 [restic]
 repository   = "/srv/restic"
@@ -34,19 +34,19 @@ check-read-percent = 80            # % of data read back (default 80)
 # Test restores: a throw-away PostgreSQL container is started from this image,
 # the latest snapshot is restored into it and the container is removed again.
 [restore]
-restore_image = "postgres:18"   # default image for restore containers
+restore-image = "postgres:18"   # default image for restore containers
 
 [backup.main_db]
 cron       = "@daily"
 container  = "postgres-main"
 database   = "app"
-restic_tag = "main_db"
+restic-tag = "main_db"
 roles      = true
-restore_cron  = "0 5 * * *"     # scheduled test restore (optional)
-restore_image = "postgres:17"   # optional override; falls back to [restore].restore_image
+restore-cron  = "0 5 * * *"     # scheduled test restore (optional)
+restore-image = "postgres:17"   # optional override; falls back to [restore].restore-image
 
 [backup.reports]
 cron        = "30 2 * * *"
 container   = "postgres-reports"
 database    = "reports"
-restic_keep-daily  = 14   # per-backup restic override
+restic-keep-daily  = 14   # per-backup restic override

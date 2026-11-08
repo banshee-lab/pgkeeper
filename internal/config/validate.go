@@ -81,6 +81,53 @@ func checkKeeps(file, prefix string, r rawRestic) []error {
 	return errs
 }
 
+func checkResticAliases(file, prefix string, b rawBackup) []error {
+	var errs []error
+	for _, field := range []struct {
+		key                string
+		prefixed, plainSet bool
+	}{
+		{"repository", b.ResticRepository != nil, b.Repository != nil},
+		{"password", b.ResticPassword != nil, b.Password != nil},
+		{"keep-daily", b.ResticKeepDaily != nil, b.KeepDaily != nil},
+		{"keep-weekly", b.ResticKeepWeekly != nil, b.KeepWeekly != nil},
+		{"keep-monthly", b.ResticKeepMonthly != nil, b.KeepMonthly != nil},
+		{"keep-yearly", b.ResticKeepYearly != nil, b.KeepYearly != nil},
+		{"skip-prune", b.ResticSkipPrune != nil, b.SkipPrune != nil},
+	} {
+		if field.prefixed && field.plainSet {
+			errs = append(errs, keyErr(file, prefix+"restic-"+field.key,
+				"cannot be set together with %q", field.key))
+		}
+	}
+	return errs
+}
+
+func checkBackupKeeps(file, prefix string, b rawBackup) []error {
+	var errs []error
+	for _, field := range []struct {
+		key      string
+		prefixed *int
+		plain    *int
+	}{
+		{"keep-daily", b.ResticKeepDaily, b.KeepDaily},
+		{"keep-weekly", b.ResticKeepWeekly, b.KeepWeekly},
+		{"keep-monthly", b.ResticKeepMonthly, b.KeepMonthly},
+		{"keep-yearly", b.ResticKeepYearly, b.KeepYearly},
+	} {
+		key := field.key
+		value := field.plain
+		if field.prefixed != nil {
+			key = "restic-" + key
+			value = field.prefixed
+		}
+		if value != nil && *value < 0 {
+			errs = append(errs, keyErr(file, prefix+key, "must be >= 0 (got %d)", *value))
+		}
+	}
+	return errs
+}
+
 func firstSet[T any](vals ...*T) T {
 	for _, v := range vals {
 		if v != nil {

@@ -1,6 +1,6 @@
 // Package reload lets the `pgkeeper -reload` command ask the running daemon
 // to re-read its configuration: the daemon records its PID in a file under
-// global.temp_path and reloads on SIGHUP.
+// global.temp-path and reloads on SIGHUP.
 package reload
 
 import (
@@ -14,7 +14,7 @@ import (
 	"syscall"
 )
 
-// PIDFile returns the PID file location for a given global.temp_path. The
+// PIDFile returns the PID file location for a given global.temp-path. The
 // name starts with a dot so it can never clash with a backup directory.
 func PIDFile(tempPath string) string {
 	return filepath.Join(tempPath, "pgkeeper", ".pgkeeper.pid")
@@ -57,7 +57,7 @@ func readPID(path string) (int, error) {
 func Signal(path string) (int, error) {
 	pid, err := readPID(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return 0, fmt.Errorf("no running pgkeeper found (%s does not exist; is it started and using the same global.temp_path?)", path)
+		return 0, fmt.Errorf("no running pgkeeper found (%s does not exist; is it started and using the same global.temp-path?)", path)
 	}
 	if err != nil {
 		return 0, err

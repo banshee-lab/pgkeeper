@@ -57,14 +57,14 @@ func (r *Runner) restoreConfig(name string) (domain.BackupConfig, error) {
 }
 
 // TestRestore restores the latest snapshot into an ephemeral container built
-// from the project's restore image (else the global [restore].restore_image).
+// from the project's restore image (else the global [restore].restore-image).
 func (r *Runner) TestRestore(ctx context.Context, name string, by domain.Trigger) (*domain.Activity, error) {
 	cfg, err := r.restoreConfig(name)
 	if err != nil {
 		return nil, err
 	}
 	if cfg.RestoreImage == "" {
-		return nil, invalid("no restore image configured for %q (set restore_image in [restore] or in the project)", name)
+		return nil, invalid("no restore image configured for %q (set restore-image in [restore] or in the project)", name)
 	}
 	return r.start(ctx, cfg, by, domain.KindTestRestore, func(ctx context.Context, act domain.Activity, lg execLog) error {
 		return r.runRestore(ctx, cfg, act, lg, domain.RestoreRequest{}, true)

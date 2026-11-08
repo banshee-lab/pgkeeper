@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -14,7 +15,7 @@ const (
 )
 
 func globalSec(dir, extra string) string {
-	return fmt.Sprintf("[global]\ntemp_path = %q\nlog_path = %q\ndb_path = %q\n%s\n",
+	return fmt.Sprintf("[global]\ntemp-path = %q\nlog-path = %q\ndb-path = %q\n%s\n",
 		filepath.Join(dir, "tmp"), filepath.Join(dir, "log"), filepath.Join(dir, "db", "x.db"), extra)
 }
 
@@ -47,19 +48,50 @@ func TestDefaults(t *testing.T) {
 	}
 }
 
+func TestHyphenatedConfigKeys(t *testing.T) {
+	cfg, err := loadWith(t, "", resticOK+
+		"[telegram]\nbot-token = \"token\"\nchat-id = \"chat\"\n"+
+		"[auth]\nissuer = \"https://id.example\"\nclient-id = \"client\"\nsecret = \"secret\"\n"+
+		"redirect-url = \"https://app.example/callback\"\nsession-ttl = \"1h\"\n"+
+		"cookie-secure = false\npost-login-redirect = \"/backups\"\n"+
+		"[restore]\nrestore-image = \"postgres:18\"\n"+
+		"[backup.main_db]\n"+std+"restic-tag = \"database\"\nrestore-cron = \"@weekly\"\nrestore-image = \"postgres:17\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Telegram == nil || cfg.Telegram.ChatID != "chat" {
+		t.Fatalf("telegram hyphenated keys not parsed: %+v", cfg.Telegram)
+	}
+	if cfg.Auth == nil || cfg.Auth.ClientID != "client" || cfg.Auth.CookieSecure ||
+		cfg.Auth.SessionTTL != time.Hour || cfg.Auth.PostLoginRedirect != "/backups" {
+		t.Fatalf("auth hyphenated keys not parsed: %+v", cfg.Auth)
+	}
+	b := cfg.Backups[0]
+	if b.ResticTag != "database" || b.RestoreCron != "@weekly" || b.RestoreImage != "postgres:17" {
+		t.Fatalf("backup hyphenated keys not parsed: %+v", b)
+	}
+}
+
 func TestResticOverridePrecedence(t *testing.T) {
-	body := resticOK + "[backup.a]\n" + std + "repository = \"/other\"\nkeep-daily = 14\n" + "[backup.b]\n" + std
+	body := resticOK +
+		"[backup.a]\n" + std + "restic-repository = \"/other\"\nrestic-keep-daily = 14\n" +
+		"[backup.b]\n" + std +
+		"[backup.c]\n" + std + "keep-daily = 9\n"
 	cfg, err := loadWith(t, "", body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a, _ := cfg.Get("a")
 	b, _ := cfg.Get("b")
+	c, _ := cfg.Get("c")
 	if a.Restic.Repository != "/other" || a.Restic.KeepDaily != 14 || a.Restic.Password.Reveal() != "pw" {
 		t.Fatalf("override failed: %+v", a.Restic)
 	}
 	if b.Restic.Repository != "/srv/restic" || b.Restic.KeepDaily != 7 {
 		t.Fatalf("global lost: %+v", b.Restic)
+	}
+	if c.Restic.KeepDaily != 9 {
+		t.Fatalf("unprefixed compatibility lost: %+v", c.Restic)
 	}
 }
 
@@ -71,12 +103,14 @@ func TestValidation(t *testing.T) {
 		{"option injection", "", resticOK + "[backup.a]\ncron = \"@daily\"\ncontainer = \"-x\"\ndatabase = \"app\"\n", "must not start with '-'"},
 		{"bad username", "", resticOK + "[backup.a]\n" + std + "username = \"-u\"\n", "backup.a.username"},
 		{"bad port", "", resticOK + "[backup.a]\n" + std + "port = 70000\n", "backup.a.port"},
-		{"negative keep", "", resticOK + "[backup.a]\n" + std + "keep-daily = -1\n", "backup.a.keep-daily"},
-		{"bad tag", "", resticOK + "[backup.a]\n" + std + "restic_tag = \"a,b\"\n", "backup.a.restic_tag"},
+		{"negative keep", "", resticOK + "[backup.a]\n" + std + "restic-keep-daily = -1\n", "backup.a.restic-keep-daily"},
+		{"duplicate restic override", "", resticOK + "[backup.a]\n" + std + "keep-daily = 1\nrestic-keep-daily = 2\n", "cannot be set together"},
+		{"bad tag", "", resticOK + "[backup.a]\n" + std + "restic-tag = \"a,b\"\n", "backup.a.restic-tag"},
 		{"no restic", "", "[backup.a]\n" + std, "backup.a.repository"},
-		{"telegram chat", "", resticOK + "[telegram]\nbot_token = \"x\"\n", "telegram.chat_id"},
-		{"auth url", "", resticOK + "[auth]\nissuer = \"nope\"\nclient_id = \"c\"\nsecret = \"s\"\nredirect_url = \"https://x/cb\"\n", "auth.issuer"},
-		{"auth ttl", "", resticOK + "[auth]\nissuer = \"https://i\"\nclient_id = \"c\"\nsecret = \"s\"\nredirect_url = \"https://x/cb\"\nsession_ttl = \"abc\"\n", "auth.session_ttl"},
+		{"telegram chat", "", resticOK + "[telegram]\nbot-token = \"x\"\n", "telegram.chat-id"},
+		{"auth url", "", resticOK + "[auth]\nissuer = \"nope\"\nclient-id = \"c\"\nsecret = \"s\"\nredirect-url = \"https://x/cb\"\n", "auth.issuer"},
+		{"auth ttl", "", resticOK + "[auth]\nissuer = \"https://i\"\nclient-id = \"c\"\nsecret = \"s\"\nredirect-url = \"https://x/cb\"\nsession-ttl = \"abc\"\n", "auth.session-ttl"},
+		{"underscore config key", "temp_path = \"/tmp\"\n", resticOK, `unknown key "global.temp_path"`},
 		{"timezone", "timezone = \"Mars/Base\"", resticOK, "global.timezone"},
 		{"unknown key", "", resticOK + "[backup.a]\n" + std + "crno = \"x\"\n", `unknown key "backup.a.crno"`},
 	}
@@ -148,9 +182,9 @@ func TestSkipPrune(t *testing.T) {
 }
 
 func TestRestoreSettings(t *testing.T) {
-	body := resticOK + "[restore]\nrestore_image = \"pg18\"\n" +
-		"[backup.a]\n" + std + "restore_cron = \"0 * * * *\"\nrestore_image = \"pg17\"\n" +
-		"[backup.b]\n" + std + "restore_cron = \"@daily\"\n" +
+	body := resticOK + "[restore]\nrestore-image = \"pg18\"\n" +
+		"[backup.a]\n" + std + "restore-cron = \"0 * * * *\"\nrestore-image = \"pg17\"\n" +
+		"[backup.b]\n" + std + "restore-cron = \"@daily\"\n" +
 		"[backup.c]\n" + std
 	cfg, err := loadWith(t, "", body)
 	if err != nil {
@@ -172,9 +206,9 @@ func TestRestoreSettings(t *testing.T) {
 
 func TestRestoreSettingsValidation(t *testing.T) {
 	for name, body := range map[string]string{
-		"cron without image": resticOK + "[backup.a]\n" + std + "restore_cron = \"@daily\"\n",
-		"bad cron":           resticOK + "[restore]\nrestore_image = \"pg18\"\n[backup.a]\n" + std + "restore_cron = \"nope\"\n",
-		"bad image":          resticOK + "[restore]\nrestore_image = \"-rm\"\n[backup.a]\n" + std,
+		"cron without image": resticOK + "[backup.a]\n" + std + "restore-cron = \"@daily\"\n",
+		"bad cron":           resticOK + "[restore]\nrestore-image = \"pg18\"\n[backup.a]\n" + std + "restore-cron = \"nope\"\n",
+		"bad image":          resticOK + "[restore]\nrestore-image = \"-rm\"\n[backup.a]\n" + std,
 		"unknown key":        resticOK + "[restore]\nimage = \"pg18\"\n[backup.a]\n" + std,
 	} {
 		if _, err := loadWith(t, "", body); err == nil {

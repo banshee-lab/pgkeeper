@@ -41,10 +41,10 @@ func RestartRequired(cur, next *Config) []string {
 		old, new string
 	}{
 		{"global.timezone", g.Location.String(), n.Location.String()},
-		{"global.temp_path", g.TempPath, n.TempPath},
-		{"global.log_path", g.LogPath, n.LogPath},
+		{"global.temp-path", g.TempPath, n.TempPath},
+		{"global.log-path", g.LogPath, n.LogPath},
 		{"global.listen", g.Listen, n.Listen},
-		{"global.db_path", g.DBPath, n.DBPath},
+		{"global.db-path", g.DBPath, n.DBPath},
 	} {
 		if c.old != c.new {
 			out = append(out, c.key)
