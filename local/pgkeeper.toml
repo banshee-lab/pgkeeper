@@ -4,6 +4,9 @@ log_path  = "/tmp/pgk/logs"
 db_path   = "/tmp/pgk/pgkeeper.db"
 listen    = ":8080"
 
+[restore]
+restore_image = "postgres:18"
+
 [restic]
 repository = "/tmp/pgk/restic"
 password   = "dev-password"
