@@ -3,6 +3,12 @@ name: Test Pull Request
 on:
   pull_request:
     types: [opened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: number
 
 jobs:
   test_backend:
@@ -11,7 +17,7 @@ jobs:
       - name: Checkout pull request code
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs.pr_number) }}
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -34,7 +40,7 @@ jobs:
       - name: Checkout pull request code
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs.pr_number) }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
