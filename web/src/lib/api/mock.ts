@@ -170,6 +170,9 @@ const defaultBackup = (name: string, lastActivity: Activity | null, running = fa
 	},
 	running,
 	next_run: at(-3_600_000),
+	restore_cron: '0 5 * * *',
+	restore_image: 'postgres:16-alpine',
+	next_restore_run: at(3_600_000 * 6),
 	last_success_at: lastActivity?.status === 'success' ? lastActivity.finished_at : null,
 	last_activity: lastActivity,
 	latest_snapshot: snapshotFor(lastActivity, index)

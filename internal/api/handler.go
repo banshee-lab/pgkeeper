@@ -143,10 +143,13 @@ func (h *Handler) backupViews(ctx context.Context, bs []domain.BackupConfig) ([]
 	tz := h.effectiveTZ()
 	out := make([]BackupDTO, 0, len(bs))
 	for _, b := range bs {
-		var next *time.Time
+		var next, nextRestore *time.Time
 		if h.Scheduler != nil {
 			if t, ok := h.Scheduler.NextRun(b.Name); ok {
 				next = &t
+			}
+			if t, ok := h.Scheduler.NextTestRestore(b.Name); ok {
+				nextRestore = &t
 			}
 		}
 		var la *domain.Activity
@@ -157,7 +160,7 @@ func (h *Handler) backupViews(ctx context.Context, bs []domain.BackupConfig) ([]
 		// (one SQLite query), never from a separate in-memory read.
 		running := la != nil && la.Status == domain.StatusRunning
 		lsAt, hasSuccess := success[b.Name]
-		dto := ToBackupDTO(b, running, next, la, lsAt, hasSuccess, tz)
+		dto := ToBackupDTO(b, running, next, nextRestore, la, lsAt, hasSuccess, tz)
 		if sn, ok := snaps[b.Name]; ok {
 			s := ToSnapshotDTO(sn)
 			dto.LatestSnapshot = &s

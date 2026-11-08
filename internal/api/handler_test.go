@@ -161,6 +161,12 @@ func (fakeSched) NextRun(name string) (time.Time, bool) {
 	}
 	return time.Time{}, false
 }
+func (fakeSched) NextTestRestore(name string) (time.Time, bool) {
+	if name == "alpha" {
+		return time.Date(2026, 11, 4, 5, 0, 0, 0, time.UTC), true
+	}
+	return time.Time{}, false
+}
 func (fakeSched) NextMaintenance(domain.MaintenanceKind) (time.Time, bool) {
 	return time.Time{}, false
 }

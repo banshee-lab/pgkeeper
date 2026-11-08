@@ -94,6 +94,8 @@ type Scheduler interface {
 	Start() error
 	Stop(ctx context.Context) error
 	NextRun(name string) (time.Time, bool)
+	// NextTestRestore is the next scheduled test restore (restore-cron) of a backup.
+	NextTestRestore(name string) (time.Time, bool)
 	NextMaintenance(kind MaintenanceKind) (time.Time, bool)
 }
 

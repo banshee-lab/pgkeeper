@@ -75,6 +75,26 @@
 			</div>
 		</dl>
 
+		{#if backup.restore_cron}
+			<dl class="space-y-3 md:col-span-2">
+				<dt class="font-mono text-[0.66rem] uppercase tracking-[0.14em] text-on-surface-faint">Test restore</dt>
+				<div class="grid gap-y-2 md:grid-cols-2">
+					<div>
+						<dt class="text-xs text-on-surface-muted">Cron</dt>
+						<dd class="font-mono text-sm text-on-surface">{backup.restore_cron}</dd>
+					</div>
+					<div>
+						<dt class="text-xs text-on-surface-muted">Next test restore</dt>
+						<NextRun value={backup.next_restore_run ?? null} />
+					</div>
+					<div class="md:col-span-2">
+						<dt class="text-xs text-on-surface-muted">Test image</dt>
+						<dd class="font-mono text-sm text-on-surface">{backup.restore_image || '—'}</dd>
+					</div>
+				</div>
+			</dl>
+		{/if}
+
 		<dl class="space-y-3 md:col-span-2">
 			<dt class="font-mono text-[0.66rem] uppercase tracking-[0.14em] text-on-surface-faint">Destination</dt>
 			<div class="grid gap-y-2 md:grid-cols-2">
