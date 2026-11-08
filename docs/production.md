@@ -52,7 +52,7 @@ sudo install -d -o pgkeeper -g pgkeeper -m 0700 /var/tmp/pgkeeper
 The service account must be able to create the database and its SQLite
 sidecar files in the database directory, create per-database activity log
 files, and write temporary dumps and restic cache data. The configured
-`global.temp_path`, `global.log_path`, and parent of `global.db_path` must
+`global.temp-path`, `global.log-path`, and parent of `global.db-path` must
 exist and be writable at startup.
 
 ## Configure pgkeeper
@@ -62,7 +62,7 @@ at least one `[backup.<name>]` and its restic repository and password. For
 production, configure `[auth]` and use HTTPS so the secure session cookie is
 sent by browsers. Register the exact public callback URL
 `https://pgkeeper.example.com/auth/callback` with the OIDC provider and set
-`auth.redirect_url` to the same URL.
+`auth.redirect-url` to the same URL.
 
 For example, the following environment file provides values referenced from
 TOML:
@@ -89,16 +89,16 @@ the same host:
 ```toml
 [global]
 listen    = "127.0.0.1:8080"
-db_path   = "/var/lib/pgkeeper/pgkeeper.db"
-log_path  = "/var/log/pgkeeper"
-temp_path = "/var/tmp"
+db-path   = "/var/lib/pgkeeper/pgkeeper.db"
+log-path  = "/var/log/pgkeeper"
+temp-path = "/var/tmp"
 
 [auth]
 issuer       = "https://idp.example.com/realms/production"
-client_id    = "pgkeeper"
+client-id    = "pgkeeper"
 secret       = "${OIDC_SECRET}"
-redirect_url = "https://pgkeeper.example.com/auth/callback"
-cookie_secure = true
+redirect-url = "https://pgkeeper.example.com/auth/callback"
+cookie-secure = true
 
 [restic]
 repository = "/srv/restic"
@@ -112,7 +112,7 @@ database  = "app"
 
 Add your actual retention policy, Telegram settings, include files, and backup
 entries as needed. Ensure the restic repository storage is durable and has
-capacity for expected growth. Set `auth.cookie_secure = true` (the default)
+capacity for expected growth. Set `auth.cookie-secure = true` (the default)
 when using HTTPS; do not disable it for a public deployment. If the OIDC
 provider or any restic/Docker dependency is unavailable, inspect the service
 logs and run the checks below before serving traffic.
@@ -203,7 +203,7 @@ After changing environment values or `global.*`, `[telegram]` or `[auth]`
 settings, restart the service. Other configuration changes can be applied
 without a restart using `pgkeeper -reload` (or `systemctl kill -s HUP
 pgkeeper`, `docker exec pgkeeper pgkeeper -reload`). Monitor structured application logs through
-the system journal and execution log files under `global.log_path`. Back up
+the system journal and execution log files under `global.log-path`. Back up
 the SQLite database and execution logs according to operational needs, and
 ensure the restic repository itself has an independent durability and recovery
 plan. pgkeeper does not automatically prune activity records or execution log
