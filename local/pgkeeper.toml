@@ -1,11 +1,11 @@
 [global]
-temp_path = "/tmp/pgk/tmp"
-log_path  = "/tmp/pgk/logs"
-db_path   = "/tmp/pgk/pgkeeper.db"
+temp-path = "/tmp/pgk/tmp"
+log-path  = "/tmp/pgk/logs"
+db-path   = "/tmp/pgk/pgkeeper.db"
 listen    = ":8080"
 
 [restore]
-restore_image = "postgres:18"
+restore-image = "postgres:18"
 
 [restic]
 repository = "/tmp/pgk/restic"

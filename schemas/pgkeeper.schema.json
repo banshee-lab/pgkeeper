@@ -20,11 +20,11 @@
           },
           "description": "Glob patterns for additional TOML configuration files."
         },
-        "temp_path": {
+        "temp-path": {
           "type": "string",
           "description": "Directory for temporary database dumps."
         },
-        "log_path": {
+        "log-path": {
           "type": "string",
           "description": "Directory for execution logs."
         },
@@ -32,7 +32,7 @@
           "type": "string",
           "description": "HTTP listen address."
         },
-        "db_path": {
+        "db-path": {
           "type": "string",
           "description": "Path to the SQLite database."
         }
@@ -41,13 +41,13 @@
     "telegram": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["bot_token", "chat_id"],
+      "required": ["bot-token", "chat-id"],
       "properties": {
-        "bot_token": {
+        "bot-token": {
           "type": "string",
           "minLength": 1
         },
-        "chat_id": {
+        "chat-id": {
           "type": "string",
           "minLength": 1
         }
@@ -56,14 +56,14 @@
     "auth": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["issuer", "client_id", "secret", "redirect_url"],
+      "required": ["issuer", "client-id", "secret", "redirect-url"],
       "properties": {
         "issuer": {
           "type": "string",
           "minLength": 1,
           "description": "Absolute URL of the OIDC issuer."
         },
-        "client_id": {
+        "client-id": {
           "type": "string",
           "minLength": 1
         },
@@ -71,7 +71,7 @@
           "type": "string",
           "minLength": 1
         },
-        "redirect_url": {
+        "redirect-url": {
           "type": "string",
           "minLength": 1,
           "description": "Absolute OIDC callback URL."
@@ -83,15 +83,15 @@
           },
           "description": "Defaults to [openid, profile, email]."
         },
-        "session_ttl": {
+        "session-ttl": {
           "type": "string",
           "description": "Positive Go duration, for example 12h or 30m."
         },
-        "cookie_secure": {
+        "cookie-secure": {
           "type": "boolean",
           "default": true
         },
-        "post_login_redirect": {
+        "post-login-redirect": {
           "type": "string",
           "default": "/"
         }
@@ -104,7 +104,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "restore_image": {
+        "restore-image": {
           "type": "string",
           "description": "Default image of the ephemeral containers used by test restores."
         }
@@ -203,17 +203,17 @@
           "maximum": 65535,
           "default": 5432
         },
-        "restic_tag": {
+        "restic-tag": {
           "type": "string",
           "description": "Defaults to the backup name; must not contain whitespace or commas."
         },
-        "restore_cron": {
+        "restore-cron": {
           "type": "string",
           "description": "Cron expression for scheduled test restores of this backup; requires a restore image."
         },
-        "restore_image": {
+        "restore-image": {
           "type": "string",
-          "description": "Image for this backup's test-restore containers; falls back to [restore].restore_image."
+          "description": "Image for this backup's test-restore containers; falls back to [restore].restore-image."
         },
         "roles": {
           "type": "boolean",
@@ -223,11 +223,23 @@
           "type": "string",
           "description": "Per-backup override for restic.repository."
         },
+        "restic-repository": {
+          "type": "string",
+          "description": "Prefixed per-backup override for restic.repository."
+        },
         "password": {
           "type": "string",
           "description": "Per-backup override for restic.password."
         },
+        "restic-password": {
+          "type": "string",
+          "description": "Prefixed per-backup override for restic.password."
+        },
         "keep-daily": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "restic-keep-daily": {
           "type": "integer",
           "minimum": 0
         },
@@ -235,7 +247,15 @@
           "type": "integer",
           "minimum": 0
         },
+        "restic-keep-weekly": {
+          "type": "integer",
+          "minimum": 0
+        },
         "keep-monthly": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "restic-keep-monthly": {
           "type": "integer",
           "minimum": 0
         },
@@ -243,7 +263,14 @@
           "type": "integer",
           "minimum": 0
         },
+        "restic-keep-yearly": {
+          "type": "integer",
+          "minimum": 0
+        },
         "skip-prune": {
+          "type": "boolean"
+        },
+        "restic-skip-prune": {
           "type": "boolean"
         }
       }

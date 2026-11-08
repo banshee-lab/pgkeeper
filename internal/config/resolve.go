@@ -46,9 +46,9 @@ func (l *loader) resolve() (*Config, []error) {
 		}
 	}
 	for _, p := range []struct{ key, dir string }{
-		{"global.temp_path", cfg.Global.TempPath},
-		{"global.log_path", cfg.Global.LogPath},
-		{"global.db_path", filepath.Dir(cfg.Global.DBPath)},
+		{"global.temp-path", cfg.Global.TempPath},
+		{"global.log-path", cfg.Global.LogPath},
+		{"global.db-path", filepath.Dir(cfg.Global.DBPath)},
 	} {
 		if err := checkWritableDir(p.dir); err != nil {
 			add(keyErr(gf, p.key, "%v", err))
@@ -59,10 +59,10 @@ func (l *loader) resolve() (*Config, []error) {
 	if t := r.Telegram; t != nil {
 		f := l.src["telegram"]
 		if t.BotToken == "" {
-			add(keyErr(f, "telegram.bot_token", "must not be empty"))
+			add(keyErr(f, "telegram.bot-token", "must not be empty"))
 		}
 		if t.ChatID == "" {
-			add(keyErr(f, "telegram.chat_id", "must not be empty"))
+			add(keyErr(f, "telegram.chat-id", "must not be empty"))
 		}
 		cfg.Telegram = &TelegramConfig{BotToken: domain.Secret(t.BotToken), ChatID: t.ChatID}
 	}
@@ -81,14 +81,14 @@ func (l *loader) resolve() (*Config, []error) {
 			ac.Scopes = []string{"openid", "profile", "email"}
 		}
 		for _, q := range []struct{ k, v string }{
-			{"issuer", a.Issuer}, {"client_id", a.ClientID},
-			{"secret", a.Secret}, {"redirect_url", a.RedirectURL},
+			{"issuer", a.Issuer}, {"client-id", a.ClientID},
+			{"secret", a.Secret}, {"redirect-url", a.RedirectURL},
 		} {
 			if q.v == "" {
 				add(keyErr(f, "auth."+q.k, "must not be empty"))
 			}
 		}
-		for _, q := range []struct{ k, v string }{{"issuer", a.Issuer}, {"redirect_url", a.RedirectURL}} {
+		for _, q := range []struct{ k, v string }{{"issuer", a.Issuer}, {"redirect-url", a.RedirectURL}} {
 			if q.v != "" {
 				if err := absURL(q.v); err != nil {
 					add(keyErr(f, "auth."+q.k, "%v (%q)", err, q.v))
@@ -98,7 +98,7 @@ func (l *loader) resolve() (*Config, []error) {
 		if a.SessionTTL != "" {
 			d, err := time.ParseDuration(a.SessionTTL)
 			if err != nil || d <= 0 {
-				add(keyErr(f, "auth.session_ttl", "invalid duration %q", a.SessionTTL))
+				add(keyErr(f, "auth.session-ttl", "invalid duration %q", a.SessionTTL))
 			} else {
 				ac.SessionTTL = d
 			}
@@ -120,7 +120,7 @@ func (l *loader) resolve() (*Config, []error) {
 		globalRestoreImage = strings.TrimSpace(deref(r.Restore.RestoreImage, ""))
 		if globalRestoreImage != "" {
 			if err := checkImage(globalRestoreImage); err != nil {
-				add(keyErr(l.srcOr("restore"), "restore.restore_image", "%v (%q)", err, globalRestoreImage))
+				add(keyErr(l.srcOr("restore"), "restore.restore-image", "%v (%q)", err, globalRestoreImage))
 			}
 		}
 	}
@@ -132,6 +132,7 @@ func (l *loader) resolve() (*Config, []error) {
 		file := l.backupSrc[name]
 		p := "backup." + name + "."
 
+		errs = append(errs, checkResticAliases(file, p, b)...)
 		if !labelRe.MatchString(name) {
 			add(keyErr(file, "backup."+name, "invalid label (must match %s)", labelRe))
 		}
@@ -152,19 +153,19 @@ func (l *loader) resolve() (*Config, []error) {
 		restoreImage := strings.TrimSpace(deref(b.RestoreImage, ""))
 		if restoreCron != "" {
 			if _, err := CronParser.Parse(restoreCron); err != nil {
-				add(keyErr(file, p+"restore_cron", "invalid cron expression %q: %v", restoreCron, err))
+				add(keyErr(file, p+"restore-cron", "invalid cron expression %q: %v", restoreCron, err))
 			}
 		}
 		if restoreImage != "" {
 			if err := checkImage(restoreImage); err != nil {
-				add(keyErr(file, p+"restore_image", "%v (%q)", err, restoreImage))
+				add(keyErr(file, p+"restore-image", "%v (%q)", err, restoreImage))
 			}
 		}
 		if restoreImage == "" {
 			restoreImage = globalRestoreImage
 		}
 		if restoreCron != "" && restoreImage == "" {
-			add(keyErr(file, p+"restore_image", "required when restore_cron is set (set [restore].restore_image or override it here)"))
+			add(keyErr(file, p+"restore-image", "required when restore-cron is set (set [restore].restore-image or override it here)"))
 		}
 
 		br := b.restic()
@@ -212,7 +213,7 @@ func (l *loader) resolve() (*Config, []error) {
 		if bc.ResticTag == "" ||
 			strings.IndexFunc(bc.ResticTag, unicode.IsSpace) >= 0 ||
 			strings.Contains(bc.ResticTag, ",") {
-			add(keyErr(file, p+"restic_tag", "must be non-empty and contain no whitespace or commas (got %q)", bc.ResticTag))
+			add(keyErr(file, p+"restic-tag", "must be non-empty and contain no whitespace or commas (got %q)", bc.ResticTag))
 		}
 		if bc.Restic.Repository == "" {
 			add(keyErr(file, p+"repository", "required (set it in [restic] or override it here)"))
@@ -220,7 +221,7 @@ func (l *loader) resolve() (*Config, []error) {
 		if bc.Restic.Password == "" {
 			add(keyErr(file, p+"password", "required (set it in [restic] or override it here)"))
 		}
-		errs = append(errs, checkKeeps(file, p, br)...)
+		errs = append(errs, checkBackupKeeps(file, p, b)...)
 
 		if bc.Container != "" && bc.Database != "" {
 			key := bc.Container + "\x00" + bc.Database
@@ -247,6 +248,7 @@ func (l *loader) resolve() (*Config, []error) {
 	}
 	return cfg, errs
 }
+
 // resolveMaintenance validates the global prune/check settings. A task whose
 // cron is empty is disabled; the read percentage defaults to 80.
 func resolveMaintenance(file string, gr rawRestic, add func(error)) domain.MaintenanceConfig {

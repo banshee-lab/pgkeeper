@@ -94,9 +94,9 @@ func Run(ctx context.Context, cfg *config.Config, configPath string, notifier do
 		RestoreExec: docker,
 		Inspector:   resticCLI,
 
-		JobHub:     jobHub,
-		LogHub:     logHub,
-		Logger:     log,
+		JobHub: jobHub,
+		LogHub: logHub,
+		Logger: log,
 	})
 
 	if runOnce != "" {
@@ -112,7 +112,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string, notifier do
 			return fmt.Errorf("auth: %w", err)
 		}
 		if !cfg.Auth.CookieSecure {
-			log.Warn("auth.cookie_secure=false: session cookie is sent over plain HTTP (local development only)")
+			log.Warn("auth.cookie-secure=false: session cookie is sent over plain HTTP (local development only)")
 		}
 		go authSvc.RunCleanup(ctx, time.Hour, log)
 	}
