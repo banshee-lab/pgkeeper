@@ -245,11 +245,21 @@ func (r *Runner) runRestore(ctx context.Context, cfg domain.BackupConfig, act do
 		}
 		defer release()
 		r.setPhase(cfg, act, domain.PhaseRestic)
-		if e := r.fetch(ctx, cfg, snap.ID, snap.dbPath, dbLocal, lg); e != nil {
+		// The snapshot's "paths" metadata is only a hint: restic dump needs the
+		// path as stored in the tree, so look the files up there.
+		dbRemote, e := r.locateFile(ctx, cfg, snap.ID, path.Base(snap.dbPath))
+		if e != nil {
+			return e
+		}
+		if e := r.fetch(ctx, cfg, snap.ID, dbRemote, dbLocal, lg); e != nil {
 			return e
 		}
 		if withRoles {
-			return r.fetch(ctx, cfg, snap.ID, snap.rolesPath, rolesLocal, lg)
+			rolesRemote, e := r.locateFile(ctx, cfg, snap.ID, path.Base(snap.rolesPath))
+			if e != nil {
+				return e
+			}
+			return r.fetch(ctx, cfg, snap.ID, rolesRemote, rolesLocal, lg)
 		}
 		return nil
 	}); err != nil {
@@ -310,6 +320,29 @@ func (r *Runner) runRestore(ctx context.Context, cfg domain.BackupConfig, act do
 		target.Database = dbName
 		return r.psqlFile(ctx, target, dbLocal, lg)
 	})
+}
+
+// locateFile walks the snapshot tree breadth-first and returns the stored path
+// of the file with the given name.
+func (r *Runner) locateFile(ctx context.Context, cfg domain.BackupConfig, snapshotID, file string) (string, error) {
+	queue := []string{""} // "" is the snapshot root
+	for visited := 0; len(queue) > 0 && visited < 200; visited++ {
+		dir := queue[0]
+		queue = queue[1:]
+		nodes, err := r.Inspector.RepositoryTree(ctx, cfg.Restic, snapshotID, dir)
+		if err != nil {
+			return "", fmt.Errorf("list snapshot contents: %w", err)
+		}
+		for _, n := range nodes {
+			switch {
+			case n.Type == "file" && path.Base(n.Path) == file:
+				return n.Path, nil
+			case n.Type == "dir":
+				queue = append(queue, n.Path)
+			}
+		}
+	}
+	return "", fmt.Errorf("%s not found in snapshot %s", file, snapshotID[:8])
 }
 
 // fetch downloads one file of a snapshot into local.
