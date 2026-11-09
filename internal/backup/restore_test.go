@@ -18,6 +18,7 @@ type fakeRestoreExec struct {
 	mu      sync.Mutex
 	calls   []string
 	scripts []string
+	targets []domain.SQLTarget
 	psqlErr func(n int, script string) error // n is the 1-based psql call number
 	block   chan struct{}                    // WaitReady waits for it when set
 }
@@ -60,6 +61,7 @@ func (f *fakeRestoreExec) Psql(_ context.Context, t domain.SQLTarget, in io.Read
 	b, _ := io.ReadAll(in)
 	f.mu.Lock()
 	f.scripts = append(f.scripts, string(b))
+	f.targets = append(f.targets, t)
 	n := len(f.scripts)
 	f.mu.Unlock()
 	if strings.HasPrefix(t.Container, "pgkeeper-restore-") {
@@ -314,4 +316,97 @@ func TestRestoreBlocksOtherRunsOfTheProject(t *testing.T) {
 	}
 	close(ex.block)
 	r.wg.Wait()
+}
+
+func withToolsImage(r *Runner, image string, conn *domain.PGConn) {
+	c := r.Catalog.(catalog)
+	cfg := c["a"]
+	cfg.ToolsImage = image
+	cfg.Conn = conn
+	c["a"] = cfg
+}
+
+func TestRestoreToDatabaseURL(t *testing.T) {
+	ex := &fakeRestoreExec{}
+	r, acts, _ := restoreSetup(t, ex)
+	withToolsImage(r, "postgres:18", nil)
+
+	act, err := r.RestoreToContainer(context.Background(), "a", domain.TriggerManual, domain.RestoreRequest{
+		SnapshotID: "bbbbbbbb22222222", IncludeRoles: true,
+		DatabaseURL: "postgresql://u:s3cret@db.example.com:6543/target?sslmode=require",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.wg.Wait()
+
+	got, _ := acts.Get(context.Background(), act.ID)
+	if got.Status != domain.StatusSuccess || got.Kind != domain.KindRestore {
+		t.Fatalf("unexpected: %+v", got)
+	}
+	calls, scripts := ex.snapshot()
+	want := []string{"psql::postgres", "psql::postgres", "psql::target"}
+	if strings.Join(calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+	if !strings.Contains(scripts[1], `DROP DATABASE IF EXISTS "target"`) || !strings.Contains(scripts[1], `CREATE DATABASE "target"`) {
+		t.Errorf("prepare script = %q", scripts[1])
+	}
+	for _, tgt := range ex.targets {
+		if tgt.Conn == nil || tgt.Conn.Host != "db.example.com" || tgt.Conn.Port != 6543 || tgt.Image != "postgres:18" {
+			t.Fatalf("target = %+v", tgt)
+		}
+	}
+	b, _ := os.ReadFile(act.LogPath)
+	if strings.Contains(string(b), "s3cret") {
+		t.Fatalf("log leaks the password: %s", b)
+	}
+	if !strings.Contains(string(b), "db.example.com:6543") {
+		t.Fatalf("log does not name the target: %s", b)
+	}
+}
+
+func TestRestoreToDatabaseURLNeedsToolsImage(t *testing.T) {
+	r, _, _ := restoreSetup(t, &fakeRestoreExec{})
+	_, err := r.RestoreToContainer(context.Background(), "a", domain.TriggerManual, domain.RestoreRequest{
+		SnapshotID: "bbbbbbbb22222222", DatabaseURL: "postgresql://u@db.example.com/target"})
+	if !errors.Is(err, domain.ErrRestoreInvalid) || !strings.Contains(err.Error(), "tools-image") {
+		t.Fatalf("want ErrRestoreInvalid about tools-image, got %v", err)
+	}
+}
+
+func TestRestoreToDatabaseURLRejectsBadRequests(t *testing.T) {
+	r, _, _ := restoreSetup(t, &fakeRestoreExec{})
+	withToolsImage(r, "postgres:18", nil)
+	for name, req := range map[string]domain.RestoreRequest{
+		"container and url": {SnapshotID: "bbbbbbbb22222222", Container: "pg", DatabaseURL: "postgresql://db/x"},
+		"bad url":           {SnapshotID: "bbbbbbbb22222222", DatabaseURL: "mysql://u:s3cret@db/x"},
+		"bad database":      {SnapshotID: "bbbbbbbb22222222", DatabaseURL: "postgresql://db/x", Database: "x\";drop"},
+	} {
+		_, err := r.RestoreToContainer(context.Background(), "a", domain.TriggerManual, req)
+		if !errors.Is(err, domain.ErrRestoreInvalid) {
+			t.Errorf("%s: want ErrRestoreInvalid, got %v", name, err)
+		} else if strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("%s: error leaks the password: %v", name, err)
+		}
+	}
+}
+
+func TestRestoreDefaultsToSourceURL(t *testing.T) {
+	ex := &fakeRestoreExec{}
+	r, acts, _ := restoreSetup(t, ex)
+	src := domain.PGConn{Host: "src.example.com", Port: 5432, User: "backup", Database: "app"}
+	withToolsImage(r, "postgres:18", &src)
+
+	act, err := r.RestoreToContainer(context.Background(), "a", domain.TriggerManual, domain.RestoreRequest{SnapshotID: "bbbbbbbb22222222"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.wg.Wait()
+	if got, _ := acts.Get(context.Background(), act.ID); got.Status != domain.StatusSuccess {
+		t.Fatalf("unexpected: %+v", got)
+	}
+	if len(ex.targets) == 0 || ex.targets[0].Conn == nil || ex.targets[0].Conn.Host != "src.example.com" {
+		t.Fatalf("targets = %+v", ex.targets)
+	}
 }

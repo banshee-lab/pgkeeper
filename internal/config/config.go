@@ -31,6 +31,8 @@ type Config struct {
 	Telegram *TelegramConfig       // nil = disabled
 	Auth     *AuthConfig           // nil = disabled
 	Backups  []domain.BackupConfig // sorted by name
+	// ToolsImage is global.tools-image; empty when not set.
+	ToolsImage string
 	// Maintenance holds the global [restic] prune/check schedules.
 	Maintenance domain.MaintenanceConfig
 	Warnings []string              // non-fatal findings; the caller logs them
@@ -62,6 +64,11 @@ func (c *Config) LogSafe() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "global: listen=%s db-path=%s timezone=%s temp-path=%s log-path=%s\n",
 		c.Global.Listen, c.Global.DBPath, c.Global.Location, c.Global.TempPath, c.Global.LogPath)
+	if c.ToolsImage != "" {
+		fmt.Fprintf(&b, "tools-image: %s\n", c.ToolsImage)
+	} else {
+		b.WriteString("tools-image: not set (remote databases via database-url are unavailable)\n")
+	}
 	if c.Telegram != nil {
 		fmt.Fprintf(&b, "telegram: enabled chat-id=%s\n", c.Telegram.ChatID)
 	} else {
@@ -78,8 +85,12 @@ func (c *Config) LogSafe() string {
 		m.PruneCron, m.CheckCron, m.ReadPercent())
 	fmt.Fprintf(&b, "backups: %d\n", len(c.Backups))
 	for _, bc := range c.Backups {
-		fmt.Fprintf(&b, "  - %s: cron=%q container=%s database=%s restic-tag=%s roles=%t repo=%s restore-cron=%q restore-image=%q\n",
-			bc.Name, bc.Cron, bc.Container, bc.Database, bc.ResticTag, bc.Roles,
+		source := "container=" + bc.Container
+		if bc.Conn != nil {
+			source = "database-url=" + bc.Conn.Redacted()
+		}
+		fmt.Fprintf(&b, "  - %s: cron=%q %s database=%s restic-tag=%s roles=%t repo=%s restore-cron=%q restore-image=%q\n",
+			bc.Name, bc.Cron, source, bc.Database, bc.ResticTag, bc.Roles,
 			RedactRepository(bc.Restic.Repository), bc.RestoreCron, bc.RestoreImage)
 	}
 	return b.String()

@@ -59,6 +59,11 @@ type DumpSpec struct {
 	Container, Database string
 	Host, Username      string
 	Port                int
+
+	// Conn, when set, dumps a remote server from a throw-away tools container
+	// built from Image, instead of running in Container.
+	Conn  *PGConn
+	Image string
 }
 
 type Executor interface {

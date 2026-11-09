@@ -5,6 +5,11 @@ temp-path = "${PGKEEPER_TEMP_PATH:-/var/tmp}"
 log-path  = "${PGKEEPER_LOG_PATH:-/var/log}"
 listen    = ":8080"
 db-path   = "${PGKEEPER_DB_PATH:-/var/lib/pgkeeper/pgkeeper.db}"
+# Image with the PostgreSQL client tools (pg_dump, pg_dumpall, psql). Required
+# to back up or restore remote databases (database-url); a one-shot container is
+# started from it for every run, so pgkeeper itself needs no PostgreSQL tools.
+# Without it, database-url backups fail and the UI disables "Restore to Database URL".
+tools-image = "postgres:18"
 
 [telegram]
 bot-token = "${TG_BOT_TOKEN}"
@@ -44,6 +49,14 @@ restic-tag = "main_db"
 roles      = true
 restore-cron  = "0 5 * * *"     # scheduled test restore (optional)
 restore-image = "postgres:17"   # optional override; falls back to [restore].restore-image
+
+# A remote PostgreSQL server instead of a container. database-url replaces
+# container/host/port/username (and database, when the URL names one).
+[backup.remote_orders]
+cron         = "0 1 * * *"
+database-url = "postgresql://backup:${ORDERS_DB_PASSWORD}@db.example.com:5432/orders?sslmode=require"
+restic-tag   = "remote_orders"
+# roles = true   # pg_dumpall --roles-only usually needs superuser rights; managed services often deny it
 
 [backup.reports]
 cron        = "30 2 * * *"

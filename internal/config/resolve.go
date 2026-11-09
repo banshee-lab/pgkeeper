@@ -55,6 +55,14 @@ func (l *loader) resolve() (*Config, []error) {
 		}
 	}
 
+	toolsImage := strings.TrimSpace(g.ToolsImage)
+	if toolsImage != "" {
+		if err := checkImage(toolsImage); err != nil {
+			add(keyErr(gf, "global.tools-image", "%v (%q)", err, toolsImage))
+		}
+	}
+	cfg.ToolsImage = toolsImage
+
 	// ---- telegram ----
 	if t := r.Telegram; t != nil {
 		f := l.src["telegram"]
@@ -136,9 +144,13 @@ func (l *loader) resolve() (*Config, []error) {
 		if !labelRe.MatchString(name) {
 			add(keyErr(file, "backup."+name, "invalid label (must match %s)", labelRe))
 		}
-		for _, q := range []struct{ k, v string }{
-			{"cron", b.Cron}, {"container", b.Container}, {"database", b.Database},
-		} {
+		dbURL := strings.TrimSpace(deref(b.DatabaseURL, ""))
+		required := []struct{ k, v string }{{"cron", b.Cron}}
+		if dbURL == "" {
+			required = append(required, struct{ k, v string }{"container", b.Container},
+				struct{ k, v string }{"database", b.Database})
+		}
+		for _, q := range required {
 			if q.v == "" {
 				add(keyErr(file, p+q.k, "must not be empty"))
 			}
@@ -190,6 +202,11 @@ func (l *loader) resolve() (*Config, []error) {
 			},
 		}
 
+		if dbURL != "" {
+			bc.Conn = resolveDatabaseURL(file, p, b, dbURL, &bc, add)
+		}
+		bc.ToolsImage = toolsImage
+
 		for _, q := range []struct {
 			k, v     string
 			required bool
@@ -223,7 +240,19 @@ func (l *loader) resolve() (*Config, []error) {
 		}
 		errs = append(errs, checkBackupKeeps(file, p, b)...)
 
-		if bc.Container != "" && bc.Database != "" {
+		if bc.Conn != nil {
+			if toolsImage == "" {
+				cfg.Warnings = append(cfg.Warnings, "backup "+name+" uses database-url but global.tools-image is not set: "+
+					"its backups will fail until a tools image (a postgres image or any image with pg_dump/psql) is configured")
+			}
+			key := "url\x00" + bc.Conn.Redacted()
+			if other, dup := seen[key]; dup {
+				cfg.Warnings = append(cfg.Warnings, "backups "+other+" and "+name+
+					" target the same database URL ("+bc.Conn.Redacted()+")")
+			} else {
+				seen[key] = name
+			}
+		} else if bc.Container != "" && bc.Database != "" {
 			key := bc.Container + "\x00" + bc.Database
 			if other, dup := seen[key]; dup {
 				cfg.Warnings = append(cfg.Warnings, "backups "+other+" and "+name+
@@ -282,4 +311,38 @@ func resolveMaintenance(file string, gr rawRestic, add func(error)) domain.Maint
 		}
 	}
 	return m
+}
+
+// resolveDatabaseURL validates a project's database-url and copies the
+// connection details into bc. Errors never echo the URL (it may carry a
+// password). It returns nil when the URL is unusable.
+func resolveDatabaseURL(file, p string, b rawBackup, dbURL string, bc *domain.BackupConfig, add func(error)) *domain.PGConn {
+	if b.Container != "" {
+		add(keyErr(file, p+"container", "cannot be set together with database-url"))
+	}
+	for _, f := range []struct {
+		k   string
+		set bool
+	}{{"host", b.Host != nil}, {"port", b.Port != nil}, {"username", b.Username != nil}} {
+		if f.set {
+			add(keyErr(file, p+f.k, "cannot be set together with database-url (it is taken from the URL)"))
+		}
+	}
+	conn, err := domain.ParsePGURL(dbURL)
+	if err != nil {
+		add(keyErr(file, p+"database-url", "%v", err))
+		return nil
+	}
+	switch {
+	case b.Database != "" && conn.Database != "" && b.Database != conn.Database:
+		add(keyErr(file, p+"database", "does not match the database in database-url"))
+	case b.Database == "" && conn.Database == "":
+		add(keyErr(file, p+"database-url", "must name a database (…/dbname) or set database"))
+	}
+	if conn.Database == "" {
+		conn.Database = b.Database
+	}
+	bc.Database = conn.Database
+	bc.Host, bc.Port, bc.Username = conn.Host, conn.Port, conn.User
+	return &conn
 }

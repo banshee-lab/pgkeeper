@@ -35,7 +35,9 @@ type BackupDTO struct {
 	Name          string       `json:"name"`
 	Cron          string       `json:"cron"`
 	Timezone      string       `json:"timezone"`
-	Container     string       `json:"container"`
+	Container     string       `json:"container"`    // empty for a project backed up from a database-url
+	DatabaseURL   string       `json:"database_url"` // credentials stripped; empty for container projects
+	ToolsImage    string       `json:"tools_image"`  // global tools-image; empty when not configured
 	Database      string       `json:"database"`
 	Username      string       `json:"username"`
 	Host          string       `json:"host"`
@@ -178,7 +180,7 @@ func redactRepo(s string) string { return credsRe.ReplaceAllString(s, "${1}***@"
 func ToBackupDTO(b domain.BackupConfig, running bool, next, nextRestore *time.Time, last *domain.Activity, lastSuccessAt time.Time, hasSuccess bool, tz string) BackupDTO {
 	d := BackupDTO{
 		Name: b.Name, Cron: b.Cron, Timezone: tz,
-		Container: b.Container, Database: b.Database,
+		Container: b.Container, Database: b.Database, ToolsImage: b.ToolsImage,
 		Username: b.Username, Host: b.Host, Port: b.Port, Roles: b.Roles,
 		RestoreCron: b.RestoreCron, RestoreImage: b.RestoreImage,
 		Restic: ResticDTO{
@@ -193,6 +195,9 @@ func ToBackupDTO(b domain.BackupConfig, running bool, next, nextRestore *time.Ti
 		NextRun:       timePtr(next),
 		NextRestoreRun: timePtr(nextRestore),
 		LastSuccessAt: timePtrVal(lastSuccessAt, hasSuccess),
+	}
+	if b.Conn != nil {
+		d.DatabaseURL = b.Conn.Redacted()
 	}
 	if last != nil {
 		a := ToActivityDTO(*last)

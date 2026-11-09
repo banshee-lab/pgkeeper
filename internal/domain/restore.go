@@ -17,6 +17,13 @@ type RestoreRequest struct {
 	// IncludeRoles restores the roles dump before the database. Existing roles
 	// are overwritten.
 	IncludeRoles bool
+	// DatabaseURL targets a remote server (postgresql://...) instead of a
+	// container; it is mutually exclusive with Container. When both Container
+	// and DatabaseURL are empty, a project backed up from a database-url is
+	// restored into that URL. Needs the tools-image.
+	DatabaseURL Secret
+	// Conn is DatabaseURL as resolved by the runner; callers leave it unset.
+	Conn *PGConn
 }
 
 // RestoreSnapshot is a restorable snapshot of a project.
@@ -40,13 +47,17 @@ type RestoreRunner interface {
 	RestoreSnapshots(ctx context.Context, name string) ([]RestoreSnapshot, error)
 }
 
-// SQLTarget identifies a PostgreSQL server reached through `docker exec`.
+// SQLTarget identifies a PostgreSQL server reached through `docker exec`, or,
+// when Conn is set, over the network from a tools container built from Image.
 type SQLTarget struct {
 	Container string
 	Host      string
 	Port      int
 	Username  string
 	Database  string // database psql connects to
+
+	Conn  *PGConn
+	Image string
 }
 
 // RestoreExecutor runs the container-side steps of a restore.

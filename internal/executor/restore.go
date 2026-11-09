@@ -125,6 +125,9 @@ func (d DockerCLI) WaitReady(ctx context.Context, t domain.SQLTarget, timeout ti
 }
 
 func (d DockerCLI) Psql(ctx context.Context, t domain.SQLTarget, in io.Reader, logw io.Writer) error {
+	if t.Conn != nil {
+		return d.runTool(ctx, t.Image, t.Conn, "psql", psqlToolArgs(t.Database), in, nil, logw)
+	}
 	var tail tailBuf
 	cmd := exec.CommandContext(ctx, d.bin(), psqlArgs(t)...)
 	cmd.Stdin = in
