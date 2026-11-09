@@ -3,6 +3,7 @@ temp-path = "/tmp/pgk/tmp"
 log-path  = "/tmp/pgk/logs"
 db-path   = "/tmp/pgk/pgkeeper.db"
 listen    = ":8080"
+tools-image = "postgres:18"
 
 [restore]
 restore-image = "postgres:18"

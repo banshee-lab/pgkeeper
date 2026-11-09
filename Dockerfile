@@ -17,7 +17,7 @@ COPY --from=web-build /src/web/build ./web/build
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pgkeeper ./cmd/pgkeeper
 
 # Runtime dependencies for backup and Docker operations.
-FROM alpine:3.22
+FROM alpine:3
 LABEL org.opencontainers.image.source https://github.com/banshee-lab/pgkeeper
 
 RUN apk add --no-cache ca-certificates docker-cli restic tzdata \
