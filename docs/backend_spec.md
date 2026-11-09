@@ -131,7 +131,8 @@ Strict TOML (unknown keys are errors). `${NAME}` is required; `${NAME:-default}`
 | `[auth]` | `issuer`, `client_id`, `secret`, `redirect_url` (required, issuer/redirect must be absolute URLs); `scopes` (default `openid profile email`), `session_ttl` (default `12h`), `cookie_secure` (default `true`), `post_login_redirect` (default `/`) |
 | `[restic]` | `repository`, `password`, `keep-daily/weekly/monthly/yearly`, `skip-prune`, and global-only `prune-cron`, `check-cron`, `check-read-percent` (1–100, default 80) |
 | `[restore]` | `restore_image` (default image for test restores) |
-| `[backup.NAME]` | `cron`, `container`, `database` (required); `username` (`postgres`), `host` (`localhost`), `port` (`5432`), `restic_tag` (defaults to NAME), `roles` (`false`), `restore_cron`, `restore_image`; per-backup restic overrides: `repository`, `password`, `keep-*`, `skip-prune` |
+| `[global]` also: `tools-image` (image with pg_dump/pg_dumpall/psql for remote databases) |
+| `[backup.NAME]` | `cron` (required) and either `container` + `database`, or `database-url` (mutually exclusive with `container`/`host`/`port`/`username`; `database` optional); `username` (`postgres`), `host` (`localhost`), `port` (`5432`), `restic_tag` (defaults to NAME), `roles` (`false`), `restore_cron`, `restore_image`; per-backup restic overrides: `repository`, `password`, `keep-*`, `skip-prune` |
 
 Validation highlights (`resolve.go`/`validate.go`): backup name regex `^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$`; cron parsed with standard 5-field + descriptors (`@daily`, `@every 1m`); container/database/user/host must not start with `-` or contain NUL/newline; tag must have no whitespace/commas; `restore_cron` needs an image (project or global); warning when two backups target the same container/database; warning for `skip-prune` without `prune-cron`.
 
@@ -201,6 +202,7 @@ Flow (`runRestore`): **snapshot** (resolve; pick latest for test restore) → **
 - **Test restore** (`POST …/restore/test`, or `restore_cron`): `docker run --detach --rm --network none --label pgkeeper.restore=true -e POSTGRES_HOST_AUTH_METHOD=trust <image>` named `pgkeeper-restore-<name>-<id8>`, wait for `pg_isready` (90 s), load roles (if the snapshot has them) and database, always `docker rm --force --volumes`. Needs `restore_image`.
 - **Container restore** (`POST …/restore/container`): target container/database default to the project's. **Drops and recreates the target database** (terminates connections first). `include_roles` requires a roles dump in the snapshot.
 - Roles script is rewritten (`restore_roles.go`): each `CREATE ROLE x;` becomes a `DO $pgkeeper$ … IF to_regrole(...) IS NULL THEN CREATE ROLE … ELSE RAISE NOTICE … END IF` block, so existing roles are kept and the following `ALTER ROLE` overwrites attributes/passwords.
+- **Restore to database URL**: `POST …/restore/container` with `database_url` (exclusive with `container`) runs `docker run --rm -i --entrypoint psql …` from `tools-image`; connection via `PG*` env vars, never arguments. Rejected with 400 when `tools-image` is unset.
 - Input validation regexes: `snapshotIDRe` (8–64 hex), `containerRe`, `dbNameRe`.
 - psql invoked as `docker exec -i <container> psql -X -q -v ON_ERROR_STOP=1 --no-password …`.
 - Startup `CleanupOrphans` removes leftover labelled containers after a crash.
@@ -232,7 +234,7 @@ Static frontend: any unmatched `GET`/`HEAD` outside `/api`, `/auth`, `/healthz` 
 | `POST …/backups/{name}/run` | `RunBackup` | same-origin; 202 / 404 / 409 / 503 |
 | `GET …/backups/{name}/restore/snapshots` | `ListRestoreSnapshots` | newest first, `has_roles` |
 | `POST …/backups/{name}/restore/test` | `RunTestRestore` | same-origin |
-| `POST …/backups/{name}/restore/container` | `RunContainerRestore` | same-origin; JSON body `{snapshot_id, container, database, include_roles}`, 4 KB cap, unknown fields rejected |
+| `POST …/backups/{name}/restore/container` | `RunContainerRestore` | same-origin; JSON body `{snapshot_id, container, database, database_url, include_roles}`, 4 KB cap, unknown fields rejected |
 | `GET /api/v1/activities`, `GET …/{id}` | `ListActivities`, `GetActivity` | filters: `limit` (1–100, default 10), `status`, `since` (RFC3339), `cursor` |
 | `GET …/activities/{id}/log` | `GetActivityLog` | `?download=1` for attachment |
 | `GET …/activities/{id}/log/stream` | `StreamActivityLog` | SSE: events `log`, `end`; supports `Last-Event-ID` |

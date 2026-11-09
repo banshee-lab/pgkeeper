@@ -23,6 +23,10 @@ type rawGlobal struct {
 	LogPath  string   `toml:"log-path"`
 	Listen   string   `toml:"listen"`
 	DBPath   string   `toml:"db-path"`
+
+	// ToolsImage is the image of the one-shot container that runs the
+	// PostgreSQL client tools against remote servers (database-url).
+	ToolsImage string `toml:"tools-image"`
 }
 
 type rawTelegram struct {
@@ -61,6 +65,9 @@ type rawBackup struct {
 	Cron      string  `toml:"cron"`
 	Container string  `toml:"container"`
 	Database  string  `toml:"database"`
+	// DatabaseURL backs up a remote server instead of a container
+	// (postgresql://[user[:password]@]host[:port]/dbname[?param=value]).
+	DatabaseURL *string `toml:"database-url"`
 	Username  *string `toml:"username"`
 	Port      *int    `toml:"port"`
 	Host      *string `toml:"host"`

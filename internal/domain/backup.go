@@ -23,6 +23,16 @@ type BackupConfig struct {
 	// RestoreImage is the image of the ephemeral test-restore container: the
 	// project override, else the global [restore].restore-image.
 	RestoreImage string
+
+	// Conn is the parsed database-url of a project that backs up a remote
+	// PostgreSQL server instead of a container; nil for container projects.
+	// For such a project Container is empty and Host, Port, Username and
+	// Database come from the URL.
+	Conn *PGConn
+	// ToolsImage is the global tools-image: the image of the one-shot
+	// container that runs pg_dump / psql against a remote server. Empty
+	// when not configured (remote backups and restores are then unavailable).
+	ToolsImage string
 }
 
 type GlobalConfig struct {

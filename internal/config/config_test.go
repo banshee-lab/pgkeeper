@@ -216,3 +216,91 @@ func TestRestoreSettingsValidation(t *testing.T) {
 		}
 	}
 }
+
+const urlBackup = "[backup.r]\ncron = \"@daily\"\ndatabase-url = \"postgresql://u:hunter2@db.example.com:6543/orders?sslmode=require\"\n"
+
+func TestDatabaseURLBackup(t *testing.T) {
+	cfg, err := loadWith(t, "tools-image = \"postgres:18\"\n", resticOK+urlBackup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := cfg.Backups[0]
+	if b.Conn == nil || b.Container != "" || b.Host != "db.example.com" || b.Port != 6543 || b.Username != "u" || b.Database != "orders" {
+		t.Fatalf("unexpected: %+v", b)
+	}
+	if b.ToolsImage != "postgres:18" || cfg.ToolsImage != "postgres:18" {
+		t.Fatalf("tools image = %q / %q", b.ToolsImage, cfg.ToolsImage)
+	}
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w, "tools-image") {
+			t.Errorf("unexpected warning: %s", w)
+		}
+	}
+	if safe := cfg.LogSafe(); strings.Contains(safe, "hunter2") || !strings.Contains(safe, "postgresql://u@db.example.com:6543/orders") {
+		t.Fatalf("LogSafe = %s", safe)
+	}
+}
+
+func TestDatabaseURLExpandsEnvironment(t *testing.T) {
+	t.Setenv("PGKEEPER_TEST_DB_PASSWORD", "hunter2")
+	cfg, err := loadWith(t, "tools-image = \"postgres:18\"\n", resticOK+
+		"[backup.r]\ncron = \"@daily\"\ndatabase-url = \"postgresql://u:${PGKEEPER_TEST_DB_PASSWORD}@db/orders\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Backups[0].Conn.Password.Reveal(); got != "hunter2" {
+		t.Fatalf("password = %q", got)
+	}
+}
+
+func TestDatabaseURLWithoutToolsImageWarns(t *testing.T) {
+	cfg, err := loadWith(t, "", resticOK+urlBackup+"[backup.c]\n"+std)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found int
+	for _, w := range cfg.Warnings {
+		if strings.Contains(w, "backup r uses database-url") && strings.Contains(w, "tools-image") {
+			found++
+		}
+		if strings.Contains(w, "backup c") && strings.Contains(w, "tools-image") {
+			t.Errorf("container backup must not warn: %s", w)
+		}
+	}
+	if found != 1 {
+		t.Fatalf("warnings = %q", cfg.Warnings)
+	}
+}
+
+func TestDatabaseURLValidation(t *testing.T) {
+	head := "[backup.r]\ncron = \"@daily\"\n"
+	for _, tc := range []struct{ name, global, body, want string }{
+		{"with container", "", head + "container = \"pg\"\ndatabase-url = \"postgresql://u@h/db\"\n", "backup.r.container: cannot be set together with database-url"},
+		{"with host", "", head + "host = \"h\"\ndatabase-url = \"postgresql://u@h/db\"\n", "backup.r.host: cannot be set together with database-url"},
+		{"bad scheme", "", head + "database-url = \"mysql://u:hunter2@h/db\"\n", "backup.r.database-url: scheme"},
+		{"bad param", "", head + "database-url = \"postgresql://u:hunter2@h/db?sslrootcert=/x\"\n", "unsupported parameter"},
+		{"no database", "", head + "database-url = \"postgresql://u@h\"\n", "must name a database"},
+		{"database mismatch", "", head + "database = \"other\"\ndatabase-url = \"postgresql://u@h/db\"\n", "backup.r.database: does not match"},
+		{"bad tools image", "tools-image = \"bad image\"\n", "", "global.tools-image"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadWith(t, tc.global, resticOK+tc.body)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), "hunter2") {
+				t.Fatalf("error leaks the password: %v", err)
+			}
+		})
+	}
+}
+
+func TestDatabaseURLDatabaseKeyAllowed(t *testing.T) {
+	cfg, err := loadWith(t, "", resticOK+"[backup.r]\ncron = \"@daily\"\ndatabase = \"orders\"\ndatabase-url = \"postgresql://u@h\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := cfg.Backups[0]; b.Database != "orders" || b.Conn.Database != "orders" {
+		t.Fatalf("unexpected: %+v", b)
+	}
+}

@@ -35,6 +35,10 @@
         "db-path": {
           "type": "string",
           "description": "Path to the SQLite database."
+        },
+        "tools-image": {
+          "type": "string",
+          "description": "Docker image providing pg_dump, pg_dumpall and psql (a postgres image or any custom image with the PostgreSQL client tools). Runs as a one-shot container for backups and restores of remote databases (database-url). Without it those are unavailable."
         }
       }
     },
@@ -173,7 +177,11 @@
     "backup": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["cron", "container", "database"],
+      "required": ["cron"],
+      "oneOf": [
+        { "required": ["container", "database"], "not": { "required": ["database-url"] } },
+        { "required": ["database-url"], "not": { "anyOf": [{ "required": ["container"] }, { "required": ["host"] }, { "required": ["port"] }, { "required": ["username"] }] } }
+      ],
       "properties": {
         "cron": {
           "type": "string",
@@ -187,7 +195,14 @@
         },
         "database": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Database name. With database-url it is optional and must match the database in the URL."
+        },
+        "database-url": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^postgres(ql)?://",
+          "description": "Back up a remote PostgreSQL server instead of a container: postgresql://[user[:password]@]host[:port]/dbname[?param=value&...]. Supported parameters: application_name, channel_binding, connect_timeout, options, sslmode. Mutually exclusive with container, host, port and username. Requires global tools-image. Use ${ENV} expansion to keep the password out of the file."
         },
         "username": {
           "type": "string",

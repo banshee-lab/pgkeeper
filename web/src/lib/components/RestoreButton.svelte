@@ -9,12 +9,13 @@
 	let { backup }: { backup: Backup } = $props();
 
 	let dialog = $state<HTMLDialogElement>();
-	let step = $state<'choose' | 'container'>('choose');
+	let step = $state<'choose' | 'container' | 'url'>('choose');
 	let busy = $state(false);
 	let snapshots = $state<RestoreSnapshot[]>([]);
 	let snapshotsLoading = $state(false);
 	let snapshotsError = $state<string | null>(null);
 	let container = $state('');
+	let databaseUrl = $state('');
 	let database = $state('');
 	let snapshotId = $state('');
 	let includeRoles = $state(false);
@@ -31,10 +32,7 @@
 		dialog?.close();
 	}
 
-	async function openContainerForm() {
-		step = 'container';
-		container = backup.container;
-		database = backup.database;
+	async function loadSnapshots() {
 		includeRoles = false;
 		snapshotsLoading = true;
 		snapshotsError = null;
@@ -49,6 +47,19 @@
 		} finally {
 			snapshotsLoading = false;
 		}
+	}
+
+	async function openContainerForm() {
+		step = 'container';
+		container = backup.container;
+		database = backup.database;
+		await loadSnapshots();
+	}
+
+	async function openUrlForm() {
+		step = 'url';
+		databaseUrl = '';
+		await loadSnapshots();
 	}
 
 	async function started(activity: Activity, message: string) {
@@ -76,6 +87,23 @@
 			await started(await startTestRestore(backup.name), 'Test restore started');
 		} catch (error) {
 			failed(error, 'Could not start the test restore.');
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function runUrl() {
+		if (busy || !snapshotId || !databaseUrl.trim()) return;
+		busy = true;
+		try {
+			const activity = await startContainerRestore(backup.name, {
+				snapshot_id: snapshotId,
+				database_url: databaseUrl.trim(),
+				include_roles: includeRoles && rolesAvailable
+			});
+			await started(activity, 'Restore started');
+		} catch (error) {
+			failed(error, 'Could not start the restore.');
 		} finally {
 			busy = false;
 		}
@@ -136,9 +164,84 @@
 					Restore a chosen snapshot into the source or another container and database.
 				</span>
 			</button>
+			<button
+				type="button"
+				class="w-full rounded border border-outline px-4 py-3 text-left hover:bg-surface-sunken disabled:opacity-50"
+				disabled={busy || !backup.tools_image}
+				onclick={openUrlForm}
+			>
+				<span class="block text-sm font-medium">Restore to Database URL</span>
+				<span class="block text-xs text-on-surface-muted">
+					{#if backup.tools_image}
+						Restore a chosen snapshot into a remote PostgreSQL server, using a temporary tools container ({backup.tools_image}).
+					{:else}
+						No tools image configured. Set <span class="font-mono">tools-image</span> in [global].
+					{/if}
+				</span>
+			</button>
 		</div>
 		<div class="mt-5 flex justify-end">
 			<Button type="button" variant="secondary" size="sm" onclick={close}>Cancel</Button>
+		</div>
+	{:else if step === 'url'}
+		<h2 class="text-base font-semibold">Restore to Database URL</h2>
+		<div class="mt-4 space-y-4">
+			<div class="space-y-1">
+				<label class="text-xs text-on-surface-muted" for="restore-database-url">
+					Database URL (postgresql://user:password@host:port/dbname)
+				</label>
+				<Input
+					id="restore-database-url"
+					bind:value={databaseUrl}
+					aria-label="Database URL"
+					size="sm"
+					autocomplete="off"
+					spellcheck={false}
+				/>
+			</div>
+			<div class="space-y-1">
+				<label class="text-xs text-on-surface-muted" for="restore-url-snapshot">Snapshot (most recent first)</label>
+				{#if snapshotsLoading}
+					<p class="text-sm text-on-surface-muted">Loading snapshots…</p>
+				{:else if snapshotsError}
+					<p class="text-sm text-danger-soft-text">{snapshotsError}</p>
+				{:else if snapshots.length === 0}
+					<p class="text-sm text-on-surface-muted">No snapshots available yet.</p>
+				{:else}
+					<select
+						id="restore-url-snapshot"
+						class="w-full rounded border border-outline bg-surface px-2 py-1.5 font-mono text-sm"
+						bind:value={snapshotId}
+					>
+						{#each snapshots as snapshot (snapshot.id)}
+							<option value={snapshot.id}>{formatDateTime(snapshot.timestamp)} · {snapshot.short_id}</option>
+						{/each}
+					</select>
+				{/if}
+			</div>
+			<label class="flex items-center gap-2 text-sm" class:opacity-50={!rolesAvailable}>
+				<input type="checkbox" bind:checked={includeRoles} disabled={!rolesAvailable} />
+				Also restore database roles first (existing roles are overwritten)
+			</label>
+			<p class="rounded border border-outline bg-surface-sunken px-3 py-2 text-xs text-danger-soft-text">
+				The database named in the URL is dropped and recreated on that server; its current data is lost.
+			</p>
+		</div>
+		<div class="mt-5 flex justify-between gap-2">
+			<Button type="button" variant="secondary" size="sm" onclick={() => (step = 'choose')}>Back</Button>
+			<div class="flex gap-2">
+				<Button type="button" variant="secondary" size="sm" onclick={close}>Cancel</Button>
+				<Button
+					type="button"
+					variant="primary"
+					size="sm"
+					loading={busy}
+					disabled={busy || !snapshotId || !databaseUrl.trim()}
+					onclick={runUrl}
+				>
+					Restore
+				</Button>
+			</div>
 		</div>
 	{:else}
 		<h2 class="text-base font-semibold">Restore to Container</h2>

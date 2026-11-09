@@ -135,7 +135,10 @@ type workFunc func(ctx context.Context, act domain.Activity, lg execLog) error
 // start registers an execution of the given kind and runs work in the
 // background. A project runs one backup or restore at a time (the job tracker
 // is keyed by project): ErrBackupRunning / ErrRestoreRunning name what holds it.
-func (r *Runner) start(ctx context.Context, cfg domain.BackupConfig, by domain.Trigger, kind domain.ActivityKind, work workFunc) (*domain.Activity, error) {
+//
+// secrets are extra values (such as the password of a remote database URL)
+// that are masked in the execution log besides the restic password.
+func (r *Runner) start(ctx context.Context, cfg domain.BackupConfig, by domain.Trigger, kind domain.ActivityKind, work workFunc, secrets ...string) (*domain.Activity, error) {
 	name := cfg.Name
 	r.mu.Lock()
 	if r.stopping {
@@ -177,7 +180,7 @@ func (r *Runner) start(ctx context.Context, cfg domain.BackupConfig, by domain.T
 	// The row is persisted: now make the job visible and publish job.started.
 	r.jobs.Announce(name, act)
 
-	go r.execute(cfg, act, work)
+	go r.execute(cfg, act, work, secrets)
 	out := act
 	return &out, nil
 }
@@ -188,6 +191,16 @@ func runNoun(kind domain.ActivityKind) string {
 		return "restore"
 	}
 	return "backup"
+}
+
+// multiRedactor applies several redactors in turn.
+type multiRedactor []logstore.Redactor
+
+func (m multiRedactor) Redact(s string) string {
+	for _, r := range m {
+		s = r.Redact(s)
+	}
+	return s
 }
 
 type execLog interface {
@@ -211,7 +224,7 @@ type redactExecLog struct {
 func (l *redactExecLog) Write(p []byte) (int, error)            { return l.stderr.Write(p) }
 func (l *redactExecLog) Logf(level, format string, args ...any) { l.base.Logf(level, format, args...) }
 
-func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity, work workFunc) {
+func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity, work workFunc, secrets []string) {
 	defer r.wg.Done()
 	defer r.jobs.Release(cfg.Name, act.ID) // safety net; idempotent, never touches a newer run
 	ctx := r.ctx
@@ -229,7 +242,13 @@ func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity, work work
 		// pg_dump / docker output cannot leak the restic password or embedded
 		// URL credentials. The runner's own Logf messages bypass this because
 		// they are constructed by code we control.
-		red := logstore.StringRedactor(cfg.Restic.Password.Reveal())
+		red := multiRedactor{logstore.StringRedactor(cfg.Restic.Password.Reveal())}
+		if cfg.Conn != nil {
+			red = append(red, logstore.StringRedactor(cfg.Conn.Password.Reveal()))
+		}
+		for _, sec := range secrets {
+			red = append(red, logstore.StringRedactor(sec))
+		}
 		rw := logstore.NewRedactWriter(w, red)
 		lg = &redactExecLog{base: w, stderr: rw}
 		closeLog = func() {
@@ -378,6 +397,9 @@ func (r *Runner) dump(ctx context.Context, cfg domain.BackupConfig, act domain.A
 	phase domain.Phase, kind domain.DumpKind, path string) (resultErr error) {
 
 	r.setPhase(cfg, act, phase)
+	if cfg.Conn != nil && cfg.ToolsImage == "" {
+		return fmt.Errorf("%s: tools-image is not configured (set tools-image in [global] to back up a database-url)", phase)
+	}
 	r.Logger.Info("backup phase started",
 		"activity", act.ID,
 		"backup", cfg.Name,
@@ -404,7 +426,7 @@ func (r *Runner) dump(ctx context.Context, cfg domain.BackupConfig, act domain.A
 		return fmt.Errorf("%s: %w", phase, err)
 	}
 	spec := domain.DumpSpec{Kind: kind, Container: cfg.Container, Database: cfg.Database,
-		Host: cfg.Host, Username: cfg.Username, Port: cfg.Port}
+		Host: cfg.Host, Username: cfg.Username, Port: cfg.Port, Conn: cfg.Conn, Image: cfg.ToolsImage}
 	dumpErr := r.Exec.Dump(ctx, spec, f, lg)
 	closeErr := f.Close()
 	if dumpErr != nil {

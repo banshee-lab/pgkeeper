@@ -241,6 +241,15 @@ the shared per-repository gate, so restores queue with backups and maintenance.
   password) and each overwrite is logged as a `NOTICE`. The connection host,
   port and user are the project's.
 
+- **Restore to a database URL** (`POST …/restore/container` with `database_url`):
+  like restore to container, but the target is a remote server given as
+  `postgresql://[user[:password]@][host][:port][/dbname][?param=value&…]`.
+  `container` and `database_url` are mutually exclusive. The database named in
+  the URL (else `database`) is dropped and recreated. For a project backed up
+  from a `database-url`, an empty `container` and `database_url` restores into
+  that URL. Needs `tools-image` (see below); without it the request is
+  rejected with `400` and the UI disables the option.
+
 ```toml
 [restore]
 restore-image = "postgres:18"   # default image for restore containers
@@ -251,6 +260,42 @@ restore-image = "postgres:17"   # optional override
 ```
 
 `restore-cron` requires an image (project or global).
+
+## Remote databases (`database-url`)
+
+A project can back up a remote PostgreSQL server instead of a container:
+
+```toml
+[global]
+tools-image = "postgres:18"     # image with pg_dump, pg_dumpall and psql
+
+[backup.remote_orders]
+cron         = "0 1 * * *"
+database-url = "postgresql://backup:${ORDERS_DB_PASSWORD}@db.example.com:5432/orders?sslmode=require"
+```
+
+- `database-url` replaces `container`, `host`, `port` and `username` (setting
+  them together is a config error). `database` is optional; when set it must
+  match the database in the URL. Use `${ENV}` expansion to keep the password out
+  of the file; special characters in a password (`@`, `/`, `:`, `%`, …) must be
+  percent-encoded in the URL.
+- pgkeeper does not need PostgreSQL tools itself. Every dump and restore step
+  runs in a one-shot `docker run --rm` container built from `tools-image` (a
+  `postgres` image, or any image that contains the PostgreSQL client tools). The
+  container uses Docker's default network, so the server must be reachable from
+  the Docker host (`localhost` in the URL is the container, not the host).
+- The connection settings are passed as libpq environment variables (`PGHOST`,
+  `PGPASSWORD`, …); the password never appears in a command line, and it is
+  masked in execution logs. Supported URL parameters: `sslmode`,
+  `connect_timeout`, `application_name`, `options`, `channel_binding`; any other
+  parameter is a config error. Certificate files (`sslrootcert`, …) are not
+  available inside the tools container.
+- Without `tools-image`, pgkeeper logs a warning at startup/reload for each
+  `database-url` backup, those backups fail with a clear error, and the UI
+  disables "Restore to Database URL" (`tools_image` is empty in the API). Test
+  restores are unaffected: they use `restore-image`.
+- The tools container is labelled `pgkeeper.restore=true`, so leftovers of a
+  crashed process are removed at startup.
 
 ## Running and operating
 

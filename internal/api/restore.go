@@ -23,10 +23,13 @@ type RestoreSnapshotDTO struct {
 }
 
 // ContainerRestoreRequestDTO is the body of POST .../restore/container.
+// DatabaseURL (postgresql://...) restores into a remote server instead of a
+// container; the two are mutually exclusive.
 type ContainerRestoreRequestDTO struct {
 	SnapshotID   string `json:"snapshot_id"`
 	Container    string `json:"container"`
 	Database     string `json:"database"`
+	DatabaseURL  string `json:"database_url"`
 	IncludeRoles bool   `json:"include_roles"`
 }
 
@@ -110,6 +113,7 @@ func (h *Handler) RunContainerRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	act, err := h.Restorer.RestoreToContainer(h.AppCtx, name, domain.TriggerManual, domain.RestoreRequest{
 		SnapshotID: body.SnapshotID, Container: body.Container, Database: body.Database, IncludeRoles: body.IncludeRoles,
+		DatabaseURL: domain.Secret(body.DatabaseURL),
 	})
 	if err != nil {
 		h.restoreError(w, r, name, "run container restore", err)

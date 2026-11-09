@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,14 +72,38 @@ func (r *Runner) TestRestore(ctx context.Context, name string, by domain.Trigger
 	})
 }
 
-// RestoreToContainer restores one snapshot into a live container, replacing
-// the target database.
+// RestoreToContainer restores one snapshot into a live container, or into a
+// remote server when req.DatabaseURL is set, replacing the target database.
 func (r *Runner) RestoreToContainer(ctx context.Context, name string, by domain.Trigger, req domain.RestoreRequest) (*domain.Activity, error) {
 	cfg, err := r.restoreConfig(name)
 	if err != nil {
 		return nil, err
 	}
-	if req.Container == "" {
+	var secrets []string
+	switch {
+	case req.DatabaseURL != "" && req.Container != "":
+		return nil, invalid("container and database_url are mutually exclusive")
+	case req.DatabaseURL != "":
+		conn, perr := domain.ParsePGURL(req.DatabaseURL.Reveal())
+		if perr != nil {
+			return nil, invalid("invalid database_url: %v", perr)
+		}
+		req.Conn = &conn
+		if req.Database == "" {
+			req.Database = conn.Database
+		}
+	case req.Container == "" && cfg.Conn != nil:
+		// A project backed up from a database-url is restored into it by default.
+		req.Conn = cfg.Conn
+	}
+	if req.Conn != nil {
+		if cfg.ToolsImage == "" {
+			return nil, invalid("tools-image is not configured: it is required to restore into a database URL (set tools-image in [global])")
+		}
+		if req.Conn.Password != "" {
+			secrets = append(secrets, req.Conn.Password.Reveal())
+		}
+	} else if req.Container == "" {
 		req.Container = cfg.Container
 	}
 	if req.Database == "" {
@@ -87,14 +112,14 @@ func (r *Runner) RestoreToContainer(ctx context.Context, name string, by domain.
 	switch {
 	case !snapshotIDRe.MatchString(req.SnapshotID):
 		return nil, invalid("snapshot_id must be a restic snapshot ID")
-	case !containerRe.MatchString(req.Container):
+	case req.Conn == nil && !containerRe.MatchString(req.Container):
 		return nil, invalid("invalid target container name %q", req.Container)
 	case !dbNameRe.MatchString(req.Database):
 		return nil, invalid("invalid target database name %q (letters, digits, '_', '.', '$', '-')", req.Database)
 	}
 	return r.start(ctx, cfg, by, domain.KindRestore, func(ctx context.Context, act domain.Activity, lg execLog) error {
 		return r.runRestore(ctx, cfg, act, lg, req, false)
-	})
+	}, secrets...)
 }
 
 // RestoreSnapshots lists the project's snapshots that contain a database
@@ -268,6 +293,11 @@ func (r *Runner) runRestore(ctx context.Context, cfg domain.BackupConfig, act do
 
 	// ---- target ----
 	target := domain.SQLTarget{Container: req.Container, Host: cfg.Host, Port: cfg.Port, Username: cfg.Username, Database: "postgres"}
+	where := "container " + strconv.Quote(req.Container)
+	if req.Conn != nil {
+		target = domain.SQLTarget{Conn: req.Conn, Image: cfg.ToolsImage, Database: "postgres"}
+		where = "server " + req.Conn.Host + ":" + strconv.Itoa(req.Conn.Port) + " (as " + req.Conn.User + ")"
+	}
 	dbName := req.Database
 	if ephemeral {
 		dbName = cfg.Database
@@ -288,7 +318,10 @@ func (r *Runner) runRestore(ctx context.Context, cfg domain.BackupConfig, act do
 			return err
 		}
 	} else {
-		lg.Logf("INFO", "target: container=%s database=%s", target.Container, dbName)
+		lg.Logf("INFO", "target: %s database=%s", where, dbName)
+		if req.Conn != nil {
+			lg.Logf("INFO", "connecting through a tools container from image %s", cfg.ToolsImage)
+		}
 	}
 
 	// ---- roles ----
@@ -309,7 +342,7 @@ func (r *Runner) runRestore(ctx context.Context, cfg domain.BackupConfig, act do
 	return step(domain.PhaseRestore, func() error {
 		var sb strings.Builder
 		if !ephemeral {
-			lg.Logf("WARN", "dropping and recreating database %q in container %q: its current data is replaced", dbName, target.Container)
+			lg.Logf("WARN", "dropping and recreating database %q on %s: its current data is replaced", dbName, where)
 			fmt.Fprintf(&sb, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '%s' AND pid <> pg_backend_pid();\n", dbName)
 			fmt.Fprintf(&sb, "DROP DATABASE IF EXISTS \"%s\";\n", dbName)
 		}

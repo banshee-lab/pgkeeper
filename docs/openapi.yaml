@@ -800,8 +800,16 @@ components:
       additionalProperties: false
       properties:
         snapshot_id: { type: string, description: Full or short restic snapshot ID of this backup }
-        container: { type: string, description: Target container; defaults to the backup's container }
-        database: { type: string, description: Target database; defaults to the backup's database }
+        container: { type: string, description: Target container; defaults to the backup's container. Mutually exclusive with database_url }
+        database_url:
+          type: string
+          description: >-
+            Restore into a remote PostgreSQL server instead of a container, using the standard
+            postgresql://[user[:password]@][host][:port][/dbname][?param=value&...] format. Requires the global
+            tools-image (otherwise 400). The database named in the URL (else `database`) is dropped and recreated.
+            Mutually exclusive with container. When both are empty and the backup was configured with a
+            database-url, the snapshot is restored into that URL.
+        database: { type: string, description: 'Target database; defaults to the database of database_url, else the backup''s database' }
         include_roles: { type: boolean, default: false }
 
     Activity:
@@ -851,7 +859,9 @@ components:
         timezone:
           type: string
           description: IANA timezone name used by the scheduler (e.g. "America/New_York" or "Local")
-        container: { type: string }
+        container: { type: string, description: 'Source container; empty when the backup uses a database-url' }
+        database_url: { type: string, description: 'Source database URL with the credentials removed (postgresql://user@host:port/db); empty for container backups' }
+        tools_image: { type: string, description: 'Global tools-image used for remote databases; empty when not configured (database-url backups fail and "restore to database URL" is unavailable)' }
         database: { type: string }
         username: { type: string }
         host: { type: string }

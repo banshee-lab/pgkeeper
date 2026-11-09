@@ -137,7 +137,7 @@ Dynamic params come from `page.params` (`$app/state`). Because the backend serve
 
 ### 4.6 Key components
 
-- `RestoreButton.svelte` – native `<dialog>`; step 1 choose **Test restore** (immediate `POST …/restore/test`) or **Restore to container**; step 2 form (container, database, snapshot picker from `restore/snapshots`, "include roles" only enabled if the snapshot `has_roles`). After starting it upserts the activity, navigates to `/backups/:name?activity=:id` and toasts. A `409` is shown as "already running". The container restore **drops the target database** – keep a clear warning in the dialog when editing.
+- `RestoreButton.svelte` – native `<dialog>`; step 1 choose **Test restore** (immediate `POST …/restore/test`) **Restore to container** or **Restore to database URL** (disabled with a hint when the backup's `tools_image` is empty); step 2 form (container, database, snapshot picker from `restore/snapshots`, "include roles" only enabled if the snapshot `has_roles`). After starting it upserts the activity, navigates to `/backups/:name?activity=:id` and toasts. A `409` is shown as "already running". The container restore **drops the target database** – keep a clear warning in the dialog when editing.
 - `RunButton.svelte` – `POST …/run`, handles 409/503.
 - `OutputPanel.svelte` – log viewer; `ActivityList.svelte` – activity picker; `DetailsPanel.svelte` – config summary (restic repo displayed through `redactUrl`).
 - `BackupNav.svelte` / `Sidebar.svelte` / `Header.svelte` / `AppShell.svelte` – navigation shell; sidebar becomes a drawer below 768 px (`aria-label` "Open navigation" / "Close navigation", dialog "Primary navigation" – the e2e test depends on these labels).

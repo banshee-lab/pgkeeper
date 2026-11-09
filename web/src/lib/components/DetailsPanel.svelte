@@ -38,10 +38,17 @@
 					<dt class="text-xs text-on-surface-muted">Database</dt>
 					<dd class="font-mono text-sm text-on-surface">{backup.database}</dd>
 				</div>
-				<div>
-					<dt class="text-xs text-on-surface-muted">Container</dt>
-					<dd class="font-mono text-sm text-on-surface">{backup.container}</dd>
-				</div>
+				{#if backup.database_url}
+					<div>
+						<dt class="text-xs text-on-surface-muted">Database URL</dt>
+						<dd class="break-all font-mono text-sm text-on-surface">{backup.database_url}</dd>
+					</div>
+				{:else}
+					<div>
+						<dt class="text-xs text-on-surface-muted">Container</dt>
+						<dd class="font-mono text-sm text-on-surface">{backup.container}</dd>
+					</div>
+				{/if}
 				<div>
 					<dt class="text-xs text-on-surface-muted">Host:port</dt>
 					<dd class="font-mono text-sm text-on-surface">{backup.host}:{backup.port}</dd>

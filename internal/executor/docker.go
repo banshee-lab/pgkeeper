@@ -48,6 +48,13 @@ func (t *tailBuf) Write(p []byte) (int, error) {
 }
 
 func (d DockerCLI) Dump(ctx context.Context, s domain.DumpSpec, out io.Writer, logw io.Writer) error {
+	if s.Conn != nil {
+		tool, args, err := pgDumpToolArgs(s)
+		if err != nil {
+			return err
+		}
+		return d.runTool(ctx, s.Image, s.Conn, tool, args, nil, out, logw)
+	}
 	args, err := buildArgs(s)
 	if err != nil {
 		return err

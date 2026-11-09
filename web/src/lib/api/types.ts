@@ -49,7 +49,12 @@ export interface Backup {
 	name: string;
 	cron: string;
 	timezone: string;
+	/** Empty when the backup uses a database-url. */
 	container: string;
+	/** Source URL without credentials; empty for container backups. */
+	database_url?: string;
+	/** Global tools-image; empty when not configured. */
+	tools_image?: string;
 	database: string;
 	username: string;
 	host: string;
@@ -75,8 +80,11 @@ export interface RestoreSnapshot {
 
 export interface ContainerRestoreRequest {
 	snapshot_id: string;
-	container: string;
-	database: string;
+	/** Mutually exclusive with database_url. */
+	container?: string;
+	database?: string;
+	/** postgresql://… of a remote server; needs the tools image. */
+	database_url?: string;
 	include_roles: boolean;
 }
 
