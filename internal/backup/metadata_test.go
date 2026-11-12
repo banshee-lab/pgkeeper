@@ -114,7 +114,7 @@ func backupWithMeta(t *testing.T, fm *fakeMeta, dumpErr error) (*Runner, *memAct
 	}
 	r.wg.Wait()
 	got, _ := acts.Get(context.Background(), act.ID)
-	return r, acts, rr, got
+	return r, acts, rr, *got
 }
 
 func TestBackupCapturesMetadataFromExportedSnapshot(t *testing.T) {
@@ -234,7 +234,7 @@ func runTestRestore(t *testing.T, r *Runner, acts *memActs) (domain.Activity, st
 	r.wg.Wait()
 	got, _ := acts.Get(context.Background(), act.ID)
 	log, _ := os.ReadFile(act.LogPath)
-	return got, string(log)
+	return *got, string(log)
 }
 
 func TestRestoreValidationMatchIsSuccess(t *testing.T) {
