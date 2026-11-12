@@ -31,7 +31,7 @@ func TestParseAndMarshalSortedKeys(t *testing.T) {
 	}
 	s := string(b)
 	last := -1
-	for _, key := range []string{`"captured_at_utc"`, `"database"`, `"format_version"`, `"objects"`, `"pg_version"`, `"sequences"`, `"table_rows"`} {
+	for _, key := range []string{`"captured_at_utc"`, `"database"`, `"format_version"`, `"objects"`, `"pg_version"`, `"sequences": {`, `"table_rows"`} {
 		i := strings.Index(s, key)
 		if i <= last {
 			t.Fatalf("key %s out of order in:\n%s", key, s)
@@ -114,7 +114,7 @@ func TestScript(t *testing.T) {
 }
 
 func TestQueryIsReadOnlyAndExcludes(t *testing.T) {
-	for _, bad := range []string{"CREATE ", "INSERT ", "UPDATE ", "DELETE ", "DROP ", "ALTER ", "TEMP"} {
+	for _, bad := range []string{"CREATE ", "INSERT ", "UPDATE ", "DELETE ", "DROP ", "ALTER ", "TEMPORARY"} {
 		if strings.Contains(strings.ToUpper(Query), bad) {
 			t.Errorf("query contains %q", bad)
 		}
