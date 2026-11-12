@@ -45,7 +45,9 @@
 						<a class="font-mono font-medium text-on-surface hover:underline" href={activity ? activityHref(activity) : projectHref(backup.name)}>
 							{backup.name}
 						</a>
-						<p class="mt-1 truncate text-xs text-danger-soft-text">{activity?.error || 'The latest backup failed.'}</p>
+						<p class="mt-1 truncate text-xs {activity?.status === 'warning' ? 'text-warning-soft-text' : 'text-danger-soft-text'}">
+							{#if activity?.status === 'warning'}<span class="font-mono font-semibold uppercase">Warning</span> · {/if}{activity?.error || 'The latest backup failed.'}
+						</p>
 						<p class="mt-1 text-xs text-on-surface-muted">{activity ? relativeShort(activity.finished_at, now) : '—'}</p>
 					</div>
 					<Button

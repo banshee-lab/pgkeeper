@@ -22,14 +22,18 @@ func formatFailure(e domain.NotifyEvent, loc *time.Location) string {
 	if d := a.Duration(); d != nil {
 		dur = d.Round(time.Second).String()
 	}
+	icon, word := "❌", "FAILED"
+	if a.Status == domain.StatusWarning {
+		icon, word = "⚠️", "WARNING"
+	}
 	if e.Title != "" {
-		head := fmt.Sprintf("❌ %s FAILED: %s\nStarted:   %s\nDuration:  %s\nError:     %s",
-			e.Title, e.Backup.Name, a.StartedAt.In(loc).Format(timeLayout), dur, a.Error)
+		head := fmt.Sprintf("%s %s %s: %s\nStarted:   %s\nDuration:  %s\nError:     %s",
+			icon, e.Title, word, e.Backup.Name, a.StartedAt.In(loc).Format(timeLayout), dur, a.Error)
 		return assemble(head, e.LogTail)
 	}
 	head := fmt.Sprintf(
-		"❌ %s FAILED: %s\nDatabase:  %s (container %s)\nStarted:   %s\nDuration:  %s\nTrigger:   %s\nPhase/Err: %s\nActivity:  %s",
-		a.EffectiveKind().Label(), e.Backup.Name, a.Database, e.Backup.Container,
+		"%s %s %s: %s\nDatabase:  %s (container %s)\nStarted:   %s\nDuration:  %s\nTrigger:   %s\nPhase/Err: %s\nActivity:  %s",
+		icon, a.EffectiveKind().Label(), word, e.Backup.Name, a.Database, e.Backup.Container,
 		a.StartedAt.In(loc).Format(timeLayout), dur, a.TriggeredBy, a.Error, a.ID)
 	return assemble(head, e.LogTail)
 }

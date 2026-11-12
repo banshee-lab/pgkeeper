@@ -61,10 +61,11 @@ export const backups = {
 		error = null;
 		state = 'idle';
 	},
-	statusOf(backup: Backup): 'running' | 'success' | 'error' | 'never' {
+	statusOf(backup: Backup): 'running' | 'success' | 'error' | 'warning' | 'never' {
 		if (backup.running) return 'running';
 		if (backup.last_activity?.status === 'success') return 'success';
 		if (backup.last_activity?.status === 'error') return 'error';
+		if (backup.last_activity?.status === 'warning') return 'warning';
 		return 'never';
 	}
 };

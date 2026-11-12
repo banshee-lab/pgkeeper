@@ -82,6 +82,8 @@ export function statusLabel(status: ActivityStatus | 'never'): string {
 			return 'Success';
 		case 'error':
 			return 'Failed';
+		case 'warning':
+			return 'Warning';
 		default:
 			return 'Never run';
 	}

@@ -56,3 +56,18 @@ func TestFormatFailureTitle(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatFailureWarningLooksDifferent(t *testing.T) {
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	end := start.Add(time.Minute)
+	a := domain.Activity{Kind: domain.KindTestRestore, StartedAt: start, FinishedAt: &end, Status: domain.StatusWarning,
+		Error: "restore ok, metadata validation found 1 mismatch"}
+	got := formatFailure(domain.NotifyEvent{Backup: domain.BackupConfig{Name: "a"}, Activity: a}, time.UTC)
+	if !strings.Contains(got, "⚠️") || !strings.Contains(got, "WARNING: a") || strings.Contains(got, "FAILED") || strings.Contains(got, "❌") {
+		t.Fatalf("warning message:\n%s", got)
+	}
+	a.Status = domain.StatusError
+	if got := formatFailure(domain.NotifyEvent{Backup: domain.BackupConfig{Name: "a"}, Activity: a}, time.UTC); !strings.Contains(got, "❌") || !strings.Contains(got, "FAILED: a") {
+		t.Fatalf("failed message:\n%s", got)
+	}
+}

@@ -118,6 +118,40 @@ string values using `${NAME}` (required) or `${NAME:-default}` (fallback).
 See [the full example](examples/pgkeeper.toml), [environment variable
 details](docs/environment.md), and the [API contract](docs/openapi.yaml).
 
+## Backup metadata and restore validation
+
+Every database dump is accompanied by `<database>.meta.json`, stored in the same
+restic snapshot (so it follows the same upload and rotation lifecycle). It holds
+object counts (tables, indexes, views, matviews, sequences, functions,
+constraints, triggers), the exact `count(*)` of every table and the `last_value`
+of every sequence, plus context (UTC timestamp, PostgreSQL version, database
+name, format version) that is not compared. System schemas, `pg_toast*`,
+`pg_temp*` and extension-owned objects are excluded. Capture only reads the
+catalog; nothing is created in the source database. No hashes are stored.
+
+**Consistency.** Session A opens `BEGIN ISOLATION LEVEL REPEATABLE READ READ
+ONLY` and exports `pg_export_snapshot()`. `pg_dump --snapshot=<id>` and the
+metadata queries (session B, `SET TRANSACTION SNAPSHOT '<id>'`) both read that
+snapshot, so the metadata matches the dump even while the database takes
+writes. Session A stays open until both finish and is always closed.
+
+**Validation.** After every test restore and live restore the restored database
+is captured with the same logic and compared with the stored metadata. Snapshots
+without a metadata file (made before this feature) skip validation with an INFO
+log line.
+
+| Result  | Meaning                                  | Colour | Alerts |
+|---------|------------------------------------------|--------|--------|
+| success | restore ok, metadata matches             | green  | none   |
+| warning | restore ok, metadata mismatch            | amber  | same as a failed job, marked `WARNING` |
+| error   | restore failed                           | red    | failed job |
+
+Each mismatch is reported as `section`, `object`, `expected`, `actual` in the
+log, the activity error, the Telegram message and the UI.
+
+Config (`[global]`): `metadata = true` (default) enables capture and
+validation; `false` disables both. Changing it needs a restart.
+
 ## Development
 
 Requirements: Go, Node.js, and Yarn. From the repository root:

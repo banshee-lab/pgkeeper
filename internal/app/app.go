@@ -92,6 +92,7 @@ func Run(ctx context.Context, cfg *config.Config, configPath string, notifier do
 		Notifier:   notifier,
 
 		RestoreExec: docker,
+		Meta:        docker,
 		Inspector:   resticCLI,
 
 		JobHub: jobHub,

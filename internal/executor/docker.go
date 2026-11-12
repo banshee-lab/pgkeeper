@@ -28,8 +28,12 @@ func buildArgs(s domain.DumpSpec) ([]string, error) {
 	port := strconv.Itoa(s.Port)
 	switch s.Kind {
 	case domain.DumpDatabase:
-		return []string{"exec", s.Container, "pg_dump", "--no-owner", "--disable-triggers", "--format=plain",
-			"-d", s.Database, "--host=" + s.Host, "-p", port, "--username=" + s.Username, "--no-password"}, nil
+		args := []string{"exec", s.Container, "pg_dump", "--no-owner", "--disable-triggers", "--format=plain",
+			"-d", s.Database, "--host=" + s.Host, "-p", port, "--username=" + s.Username, "--no-password"}
+		if s.SnapshotID != "" {
+			args = append(args, "--snapshot="+s.SnapshotID)
+		}
+		return args, nil
 	case domain.DumpRoles:
 		return []string{"exec", s.Container, "pg_dumpall",
 			"--host=" + s.Host, "-p", port, "--username=" + s.Username, "--no-password", "--roles-only"}, nil

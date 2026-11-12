@@ -64,6 +64,11 @@ type DumpSpec struct {
 	// built from Image, instead of running in Container.
 	Conn  *PGConn
 	Image string
+
+	// SnapshotID, when set, makes pg_dump read the exported snapshot of an
+	// open transaction (--snapshot) so the dump matches the metadata captured
+	// from the same snapshot. Ignored for roles dumps.
+	SnapshotID string
 }
 
 type Executor interface {

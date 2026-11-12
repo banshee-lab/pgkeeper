@@ -38,4 +38,8 @@ type BackupConfig struct {
 type GlobalConfig struct {
 	Location                          *time.Location
 	TempPath, LogPath, Listen, DBPath string
+
+	// Metadata enables backup metadata capture (<db>.meta.json) and restore
+	// validation against it. Default true.
+	Metadata bool
 }

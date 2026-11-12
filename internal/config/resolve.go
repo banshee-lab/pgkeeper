@@ -36,6 +36,7 @@ func (l *loader) resolve() (*Config, []error) {
 		LogPath:  cmp.Or(g.LogPath, "/var/log"),
 		Listen:   cmp.Or(g.Listen, ":8080"),
 		DBPath:   cmp.Or(g.DBPath, "/var/lib/pgkeeper/pgkeeper.db"),
+		Metadata: deref(g.Metadata, true),
 	}
 	if g.Timezone != "" {
 		loc, err := time.LoadLocation(g.Timezone)

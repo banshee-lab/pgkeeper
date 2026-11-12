@@ -700,7 +700,10 @@ components:
 
     ActivityStatus:
       type: string
-      enum: [running, success, error]
+      enum: [running, success, error, warning]
+      description: >
+        `warning`: a restore completed but the restored database does not match the
+        metadata captured at backup time. The job counts as failed (same alerts).
 
     Repository:
       type: object
@@ -773,7 +776,7 @@ components:
 
     Phase:
       type: string
-      enum: [queued, dump, roles, restic, cleanup, snapshot, provision, restore]
+      enum: [queued, dump, roles, restic, cleanup, snapshot, provision, restore, validate]
       description: |
         `queued` means the run finished its dumps and waits for another backup
         that is using the same restic repository. `snapshot`, `provision` and
@@ -917,7 +920,7 @@ components:
       type: object
       required: [status]
       properties:
-        status: { type: string, enum: [success, error] }
+        status: { type: string, enum: [success, error, warning] }
         error: { type: string }
 
     Me:
