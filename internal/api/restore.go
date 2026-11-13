@@ -14,6 +14,12 @@ import (
 	"github.com/banshee-lab/pgkeeper/internal/domain"
 )
 
+// TestRestoreRequestDTO is the optional body of POST .../restore/test.
+// An empty or omitted SnapshotID restores the latest snapshot.
+type TestRestoreRequestDTO struct {
+	SnapshotID string `json:"snapshot_id"`
+}
+
 // RestoreSnapshotDTO is a restorable snapshot of a project.
 type RestoreSnapshotDTO struct {
 	ID        string `json:"id"`
@@ -75,17 +81,27 @@ func (h *Handler) ListRestoreSnapshots(w http.ResponseWriter, r *http.Request) {
 // RunTestRestore starts a manual test restore into an ephemeral container.
 func (h *Handler) RunTestRestore(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	// CSRF defence: a body, if present, must be JSON (it is otherwise ignored).
+	// CSRF defence: a body, if present, must be JSON. The body is optional;
+	// without it (or with an empty snapshot_id) the latest snapshot is used.
 	if r.ContentLength != 0 && !isJSON(r) {
 		writeError(w, http.StatusBadRequest, CodeInvalidRequest, "Content-Type must be application/json")
 		return
+	}
+	var body TestRestoreRequestDTO
+	if r.ContentLength != 0 {
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, CodeInvalidRequest, "invalid request body")
+			return
+		}
 	}
 	if h.Restorer == nil {
 		writeError(w, http.StatusServiceUnavailable, CodeUnavailable, "restore is not available")
 		return
 	}
 	// AppCtx, not r.Context(): the execution must outlive this request.
-	act, err := h.Restorer.TestRestore(h.AppCtx, name, domain.TriggerManual)
+	act, err := h.Restorer.TestRestore(h.AppCtx, name, domain.TriggerManual, body.SnapshotID)
 	if err != nil {
 		h.restoreError(w, r, name, "run test restore", err)
 		return

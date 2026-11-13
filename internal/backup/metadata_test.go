@@ -227,7 +227,7 @@ func metaRestoreSetup(t *testing.T, expected string, actual *fakeMeta) (*Runner,
 
 func runTestRestore(t *testing.T, r *Runner, acts *memActs) (domain.Activity, string) {
 	t.Helper()
-	act, err := r.TestRestore(context.Background(), "a", domain.TriggerManual)
+	act, err := r.TestRestore(context.Background(), "a", domain.TriggerManual, "")
 	if err != nil {
 		t.Fatal(err)
 	}

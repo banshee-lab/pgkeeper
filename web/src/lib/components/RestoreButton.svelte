@@ -9,7 +9,7 @@
 	let { backup }: { backup: Backup } = $props();
 
 	let dialog = $state<HTMLDialogElement>();
-	let step = $state<'choose' | 'container' | 'url'>('choose');
+	let step = $state<'choose' | 'test' | 'container' | 'url'>('choose');
 	let busy = $state(false);
 	let snapshots = $state<RestoreSnapshot[]>([]);
 	let snapshotsLoading = $state(false);
@@ -49,6 +49,11 @@
 		}
 	}
 
+	async function openTestForm() {
+		step = 'test';
+		await loadSnapshots();
+	}
+
 	async function openContainerForm() {
 		step = 'container';
 		container = backup.container;
@@ -81,10 +86,11 @@
 	}
 
 	async function runTest() {
-		if (busy) return;
+		if (busy || !snapshotId) return;
 		busy = true;
 		try {
-			await started(await startTestRestore(backup.name), 'Test restore started');
+			// snapshotId defaults to the latest snapshot (first of the list).
+			await started(await startTestRestore(backup.name, snapshotId), 'Test restore started');
 		} catch (error) {
 			failed(error, 'Could not start the test restore.');
 		} finally {
@@ -142,12 +148,12 @@
 				type="button"
 				class="w-full rounded border border-outline px-4 py-3 text-left hover:bg-surface-sunken disabled:opacity-50"
 				disabled={busy || !backup.restore_image}
-				onclick={runTest}
+				onclick={openTestForm}
 			>
 				<span class="block text-sm font-medium">Test Restore</span>
 				<span class="block text-xs text-on-surface-muted">
 					{#if backup.restore_image}
-						Restore the latest snapshot into a temporary container ({backup.restore_image}) that is removed afterwards.
+						Restore a chosen snapshot (latest by default) into a temporary container ({backup.restore_image}) that is removed afterwards.
 					{:else}
 						No restore image configured. Set <span class="font-mono">restore_image</span> in the project or in [restore].
 					{/if}
@@ -182,6 +188,52 @@
 		</div>
 		<div class="mt-5 flex justify-end">
 			<Button type="button" variant="secondary" size="sm" onclick={close}>Cancel</Button>
+		</div>
+	{:else if step === 'test'}
+		<h2 class="text-base font-semibold">Test Restore</h2>
+		<div class="mt-4 space-y-4">
+			<div class="space-y-1">
+				<label class="text-xs text-on-surface-muted" for="restore-test-snapshot">Snapshot (most recent first)</label>
+				{#if snapshotsLoading}
+					<p class="text-sm text-on-surface-muted">Loading snapshots…</p>
+				{:else if snapshotsError}
+					<p class="text-sm text-danger-soft-text">{snapshotsError}</p>
+				{:else if snapshots.length === 0}
+					<p class="text-sm text-on-surface-muted">No snapshots available yet.</p>
+				{:else}
+					<select
+						id="restore-test-snapshot"
+						class="w-full rounded border border-outline bg-surface px-2 py-1.5 font-mono text-sm"
+						bind:value={snapshotId}
+					>
+						{#each snapshots as snapshot, index (snapshot.id)}
+							<option value={snapshot.id}>
+								{formatDateTime(snapshot.timestamp)} · {snapshot.short_id}{index === 0 ? ' (latest)' : ''}
+							</option>
+						{/each}
+					</select>
+				{/if}
+			</div>
+			<p class="rounded border border-outline bg-surface-sunken px-3 py-2 text-xs text-on-surface-muted">
+				Restored into a temporary container ({backup.restore_image}) that is removed afterwards. Scheduled test
+				restores always use the latest snapshot.
+			</p>
+		</div>
+		<div class="mt-5 flex justify-between gap-2">
+			<Button type="button" variant="secondary" size="sm" onclick={() => (step = 'choose')}>Back</Button>
+			<div class="flex gap-2">
+				<Button type="button" variant="secondary" size="sm" onclick={close}>Cancel</Button>
+				<Button
+					type="button"
+					variant="primary"
+					size="sm"
+					loading={busy}
+					disabled={busy || snapshotsLoading || !snapshotId}
+					onclick={runTest}
+				>
+					Run test restore
+				</Button>
+			</div>
 		</div>
 	{:else if step === 'url'}
 		<h2 class="text-base font-semibold">Restore to Database URL</h2>

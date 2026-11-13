@@ -129,8 +129,8 @@ func TestMaintenanceScheduleFires(t *testing.T) {
 
 type fakeRestorer struct{ ch chan string }
 
-func (f fakeRestorer) TestRestore(_ context.Context, name string, by domain.Trigger) (*domain.Activity, error) {
-	if by != domain.TriggerSchedule {
+func (f fakeRestorer) TestRestore(_ context.Context, name string, by domain.Trigger, snapshotID string) (*domain.Activity, error) {
+	if by != domain.TriggerSchedule || snapshotID != "" {
 		return nil, domain.ErrRestoreInvalid
 	}
 	f.ch <- name

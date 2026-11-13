@@ -79,6 +79,11 @@ export interface RestoreSnapshot {
 	has_roles: boolean;
 }
 
+export interface TestRestoreRequest {
+	/** Omitted or empty = latest snapshot. */
+	snapshot_id?: string;
+}
+
 export interface ContainerRestoreRequest {
 	snapshot_id: string;
 	/** Mutually exclusive with database_url. */

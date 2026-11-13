@@ -139,7 +139,7 @@ func TestTestRestoreSucceedsAndRemovesContainer(t *testing.T) {
 	ex := &fakeRestoreExec{}
 	r, acts, n := restoreSetup(t, ex)
 
-	act, err := r.TestRestore(context.Background(), "a", domain.TriggerSchedule)
+	act, err := r.TestRestore(context.Background(), "a", domain.TriggerSchedule, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestTestRestoreFailureStillRemovesContainerAndNotifies(t *testing.T) {
 	}}
 	r, acts, n := restoreSetup(t, ex)
 
-	act, err := r.TestRestore(context.Background(), "a", domain.TriggerManual)
+	act, err := r.TestRestore(context.Background(), "a", domain.TriggerManual, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,16 +203,66 @@ func TestTestRestoreFailureStillRemovesContainerAndNotifies(t *testing.T) {
 	}
 }
 
+func testRestoreLog(t *testing.T, r *Runner, acts *memActs, by domain.Trigger, snapshotID string) (*domain.Activity, string) {
+	t.Helper()
+	act, err := r.TestRestore(context.Background(), "a", by, snapshotID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.wg.Wait()
+	got, _ := acts.Get(context.Background(), act.ID)
+	b, _ := os.ReadFile(act.LogPath)
+	return got, string(b)
+}
+
+func TestTestRestoreDefaultsToLatestSnapshot(t *testing.T) {
+	r, acts, _ := restoreSetup(t, &fakeRestoreExec{})
+	got, log := testRestoreLog(t, r, acts, domain.TriggerManual, "")
+	if got.Status != domain.StatusSuccess || !strings.Contains(log, "restoring snapshot bbbbbbbb") {
+		t.Fatalf("status=%s log=%s", got.Status, log)
+	}
+}
+
+func TestTestRestoreManualSelectedSnapshot(t *testing.T) {
+	for _, id := range []string{"aaaaaaaa", "aaaaaaaa11111111"} { // short and full ID
+		r, acts, _ := restoreSetup(t, &fakeRestoreExec{})
+		got, log := testRestoreLog(t, r, acts, domain.TriggerManual, id)
+		if got.Status != domain.StatusSuccess || !strings.Contains(log, "restoring snapshot aaaaaaaa") {
+			t.Fatalf("id=%s status=%s log=%s", id, got.Status, log)
+		}
+	}
+}
+
+func TestTestRestoreScheduledAlwaysLatest(t *testing.T) {
+	r, acts, _ := restoreSetup(t, &fakeRestoreExec{})
+	got, log := testRestoreLog(t, r, acts, domain.TriggerSchedule, "aaaaaaaa")
+	if got.Status != domain.StatusSuccess || !strings.Contains(log, "restoring snapshot bbbbbbbb") {
+		t.Fatalf("scheduled run must ignore the snapshot: status=%s log=%s", got.Status, log)
+	}
+}
+
+func TestTestRestoreRejectsBadSnapshot(t *testing.T) {
+	r, acts, _ := restoreSetup(t, &fakeRestoreExec{})
+	if _, err := r.TestRestore(context.Background(), "a", domain.TriggerManual, "not-an-id"); !errors.Is(err, domain.ErrRestoreInvalid) {
+		t.Fatalf("want ErrRestoreInvalid, got %v", err)
+	}
+	// well-formed but foreign snapshot (belongs to another host): the run fails.
+	got, _ := testRestoreLog(t, r, acts, domain.TriggerManual, "cccccccc")
+	if got.Status != domain.StatusError || !strings.Contains(got.Error, "does not belong to this project") {
+		t.Fatalf("unexpected: %+v", got)
+	}
+}
+
 func TestTestRestoreNeedsImage(t *testing.T) {
 	r, _, _ := restoreSetup(t, &fakeRestoreExec{})
 	c := r.Catalog.(catalog)
 	cfg := c["a"]
 	cfg.RestoreImage = ""
 	c["a"] = cfg
-	if _, err := r.TestRestore(context.Background(), "a", domain.TriggerManual); !errors.Is(err, domain.ErrRestoreInvalid) {
+	if _, err := r.TestRestore(context.Background(), "a", domain.TriggerManual, ""); !errors.Is(err, domain.ErrRestoreInvalid) {
 		t.Fatalf("want ErrRestoreInvalid, got %v", err)
 	}
-	if _, err := r.TestRestore(context.Background(), "nope", domain.TriggerManual); !errors.Is(err, domain.ErrBackupUnknown) {
+	if _, err := r.TestRestore(context.Background(), "nope", domain.TriggerManual, ""); !errors.Is(err, domain.ErrBackupUnknown) {
 		t.Fatalf("want ErrBackupUnknown, got %v", err)
 	}
 }
@@ -295,7 +345,7 @@ func TestRestoreBlocksOtherRunsOfTheProject(t *testing.T) {
 	ex := &fakeRestoreExec{block: make(chan struct{})}
 	r, _, _ := restoreSetup(t, ex)
 
-	if _, err := r.TestRestore(context.Background(), "a", domain.TriggerManual); err != nil {
+	if _, err := r.TestRestore(context.Background(), "a", domain.TriggerManual, ""); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(3 * time.Second)
@@ -308,7 +358,7 @@ func TestRestoreBlocksOtherRunsOfTheProject(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, err := r.TestRestore(context.Background(), "a", domain.TriggerManual); !errors.Is(err, domain.ErrRestoreRunning) {
+	if _, err := r.TestRestore(context.Background(), "a", domain.TriggerManual, ""); !errors.Is(err, domain.ErrRestoreRunning) {
 		t.Fatalf("want ErrRestoreRunning, got %v", err)
 	}
 	if _, err := r.Run(context.Background(), "a", domain.TriggerManual); !errors.Is(err, domain.ErrRestoreRunning) {
