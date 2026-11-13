@@ -149,6 +149,12 @@ log line.
 Each mismatch is reported as `section`, `object`, `expected`, `actual` in the
 log, the activity error, the Telegram message and the UI.
 
+**Test restores.** A manual test restore (UI: *Restore → Test Restore*, or
+`POST /api/v1/backups/{name}/restore/test`) lets you pick the snapshot to
+restore; the latest snapshot is preselected, and an API call without a body
+restores the latest one. Scheduled test restores (`restore-cron`) always use
+the latest snapshot.
+
 Config (`[global]`): `metadata = true` (default) enables capture and
 validation; `false` disables both. Changing it needs a restart.
 

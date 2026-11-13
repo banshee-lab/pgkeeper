@@ -39,8 +39,10 @@ type RestoreSnapshot struct {
 // A project runs one backup or restore at a time: ErrBackupRunning or
 // ErrRestoreRunning is returned while another one is in progress.
 type RestoreRunner interface {
-	// TestRestore restores the latest snapshot into a throw-away container.
-	TestRestore(ctx context.Context, name string, by Trigger) (*Activity, error)
+	// TestRestore restores a snapshot into a throw-away container. An empty
+	// snapshotID selects the latest snapshot; scheduled test restores (by ==
+	// TriggerSchedule) always use the latest snapshot and ignore snapshotID.
+	TestRestore(ctx context.Context, name string, by Trigger, snapshotID string) (*Activity, error)
 	// RestoreToContainer restores the requested snapshot into a live container.
 	RestoreToContainer(ctx context.Context, name string, by Trigger, req RestoreRequest) (*Activity, error)
 	// RestoreSnapshots lists the project's restorable snapshots, newest first.

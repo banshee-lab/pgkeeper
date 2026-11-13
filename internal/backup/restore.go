@@ -58,9 +58,11 @@ func (r *Runner) restoreConfig(name string) (domain.BackupConfig, error) {
 	return cfg, nil
 }
 
-// TestRestore restores the latest snapshot into an ephemeral container built
-// from the project's restore image (else the global [restore].restore-image).
-func (r *Runner) TestRestore(ctx context.Context, name string, by domain.Trigger) (*domain.Activity, error) {
+// TestRestore restores a snapshot into an ephemeral container built from the
+// project's restore image (else the global [restore].restore-image). An empty
+// snapshotID selects the latest snapshot. Scheduled test restores always use
+// the latest snapshot, whatever snapshotID says.
+func (r *Runner) TestRestore(ctx context.Context, name string, by domain.Trigger, snapshotID string) (*domain.Activity, error) {
 	cfg, err := r.restoreConfig(name)
 	if err != nil {
 		return nil, err
@@ -68,8 +70,15 @@ func (r *Runner) TestRestore(ctx context.Context, name string, by domain.Trigger
 	if cfg.RestoreImage == "" {
 		return nil, invalid("no restore image configured for %q (set restore-image in [restore] or in the project)", name)
 	}
+	if by == domain.TriggerSchedule {
+		snapshotID = ""
+	}
+	if snapshotID != "" && !snapshotIDRe.MatchString(snapshotID) {
+		return nil, invalid("snapshot_id must be a restic snapshot ID")
+	}
+	req := domain.RestoreRequest{SnapshotID: snapshotID}
 	return r.start(ctx, cfg, by, domain.KindTestRestore, func(ctx context.Context, act domain.Activity, lg execLog) error {
-		return r.runRestore(ctx, cfg, act, lg, domain.RestoreRequest{}, true)
+		return r.runRestore(ctx, cfg, act, lg, req, true)
 	})
 }
 
@@ -250,7 +259,7 @@ func (r *Runner) runRestore(ctx context.Context, cfg domain.BackupConfig, act do
 		if e != nil {
 			return e
 		}
-		if snap, e = pickSnapshot(snaps, req.SnapshotID, ephemeral); e != nil {
+		if snap, e = pickSnapshot(snaps, req.SnapshotID, ephemeral && req.SnapshotID == ""); e != nil {
 			return e
 		}
 		if ephemeral {

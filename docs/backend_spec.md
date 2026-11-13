@@ -197,7 +197,7 @@ Other details:
 
 Both modes are *activities* (`kind = test_restore | restore`) and share the one-job-per-project lock with backups.
 
-Flow (`runRestore`): **snapshot** (resolve; pick latest for test restore) → **restic** (queue on the gate, locate file via BFS over `restic ls` up to 200 dirs, `restic dump` into `<temp>/pgkeeper/restore/<name>-<id8>/`) → [**provision**, test only] → [**roles**] → **restore** → cleanup.
+Flow (`runRestore`): **snapshot** (resolve; test restore picks the latest unless a manual run names a snapshot) → **restic** (queue on the gate, locate file via BFS over `restic ls` up to 200 dirs, `restic dump` into `<temp>/pgkeeper/restore/<name>-<id8>/`) → [**provision**, test only] → [**roles**] → **restore** → cleanup.
 
 - **Test restore** (`POST …/restore/test`, or `restore_cron`): `docker run --detach --rm --network none --label pgkeeper.restore=true -e POSTGRES_HOST_AUTH_METHOD=trust <image>` named `pgkeeper-restore-<name>-<id8>`, wait for `pg_isready` (90 s), load roles (if the snapshot has them) and database, always `docker rm --force --volumes`. Needs `restore_image`.
 - **Container restore** (`POST …/restore/container`): target container/database default to the project's. **Drops and recreates the target database** (terminates connections first). `include_roles` requires a roles dump in the snapshot.
