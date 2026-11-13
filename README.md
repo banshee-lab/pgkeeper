@@ -125,7 +125,7 @@ restic snapshot (so it follows the same upload and rotation lifecycle). It holds
 object counts (tables, indexes, views, matviews, sequences, functions,
 constraints, triggers), the exact `count(*)` of every table and the `last_value`
 of every sequence, plus context (UTC timestamp, PostgreSQL version, database
-name, format version) that is not compared. System schemas, `pg_toast*`,
+name, format version) that is not compared. `NOT NULL` constraints are not counted (PostgreSQL 18 lists them in `pg_constraint`, older versions don't), so dumps restore cleanly across major versions. System schemas, `pg_toast*`,
 `pg_temp*` and extension-owned objects are excluded. Capture only reads the
 catalog; nothing is created in the source database. No hashes are stored.
 

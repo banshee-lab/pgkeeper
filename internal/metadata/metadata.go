@@ -54,7 +54,10 @@ func schemaOK(nsExpr string) string { return fmt.Sprintf(userSchema, nsExpr, nsE
 // rel is the WHERE clause for pg_class rows aliased c.
 var rel = schemaOK("c.relnamespace") + " AND " + notExt("pg_class", "c.oid")
 
-// Query is the read-only catalog query. It returns one JSON document. Row
+// Query is the read-only catalog query. NOT NULL constraints (contype 'n',
+// stored in pg_constraint only since PostgreSQL 18) are excluded so counts are
+// comparable between a dump from PG <= 17 and a restore into PG >= 18.
+// It returns one JSON document. Row
 // counts use query_to_xml so no object is created in the database.
 var Query = `SELECT json_build_object(
  'pg_version', current_setting('server_version'),
@@ -66,7 +69,7 @@ var Query = `SELECT json_build_object(
   'matviews',    (SELECT count(*) FROM pg_class c WHERE c.relkind = 'm' AND ` + rel + `),
   'sequences',   (SELECT count(*) FROM pg_class c WHERE c.relkind = 'S' AND ` + rel + `),
   'functions',   (SELECT count(*) FROM pg_proc p WHERE p.prokind IN ('f','p','w') AND ` + schemaOK("p.pronamespace") + ` AND ` + notExt("pg_proc", "p.oid") + `),
-  'constraints', (SELECT count(*) FROM pg_constraint k WHERE ` + schemaOK("k.connamespace") + ` AND ` + notExt("pg_constraint", "k.oid") + `
+  'constraints', (SELECT count(*) FROM pg_constraint k WHERE k.contype <> 'n' AND ` + schemaOK("k.connamespace") + ` AND ` + notExt("pg_constraint", "k.oid") + `
                     AND (k.conrelid = 0 OR NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = k.conrelid AND d.deptype = 'e'))),
   'triggers',    (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid WHERE NOT t.tgisinternal AND ` + rel + `)
  ),

@@ -119,7 +119,7 @@ func TestQueryIsReadOnlyAndExcludes(t *testing.T) {
 			t.Errorf("query contains %q", bad)
 		}
 	}
-	for _, want := range []string{"pg_catalog", "information_schema", `pg\_toast%`, `pg\_temp%`, "deptype = 'e'", "query_to_xml"} {
+	for _, want := range []string{"pg_catalog", "information_schema", `pg\_toast%`, `pg\_temp%`, "deptype = 'e'", "query_to_xml", "k.contype <> 'n'"} {
 		if !strings.Contains(Query, want) {
 			t.Errorf("query missing %q", want)
 		}
