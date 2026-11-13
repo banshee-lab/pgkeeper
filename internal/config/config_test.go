@@ -304,3 +304,20 @@ func TestDatabaseURLDatabaseKeyAllowed(t *testing.T) {
 		t.Fatalf("unexpected: %+v", b)
 	}
 }
+
+func TestMetadataDefaultAndOverride(t *testing.T) {
+	cfg, err := loadWith(t, "", resticOK+"[backup.main_db]\n"+std)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Global.Metadata {
+		t.Fatal("metadata must default to true")
+	}
+	cfg, err = loadWith(t, "metadata = false", resticOK+"[backup.main_db]\n"+std)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Global.Metadata {
+		t.Fatal("metadata = false ignored")
+	}
+}

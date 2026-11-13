@@ -54,7 +54,7 @@
 							</div>
 						</div>
 						{#if activity.error}
-							<p class="mt-2 max-w-xl truncate text-xs text-danger-soft-text" title={activity.error}>{activity.error}</p>
+							<p class="mt-2 max-w-xl truncate text-xs {activity.status === 'warning' ? 'text-warning-soft-text' : 'text-danger-soft-text'}" title={activity.error}>{activity.error}</p>
 						{/if}
 					</button>
 				</li>

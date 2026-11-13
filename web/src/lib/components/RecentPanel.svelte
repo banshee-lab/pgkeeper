@@ -8,7 +8,13 @@
 	let { items, now }: { items: RecentItem[]; now: number } = $props();
 
 	function tone(status: Activity['status']) {
-		return status === 'success' ? 'success' : status === 'error' ? 'danger' : 'primary';
+		return status === 'success'
+			? 'success'
+			: status === 'error'
+				? 'danger'
+				: status === 'warning'
+					? 'warning'
+					: 'primary';
 	}
 
 	function href(item: RecentItem): string {

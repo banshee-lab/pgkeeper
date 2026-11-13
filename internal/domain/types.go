@@ -7,6 +7,9 @@ const (
     StatusRunning Status = "running"
     StatusSuccess Status = "success"
     StatusError   Status = "error"
+    // StatusWarning: the restore succeeded but the restored database does not
+    // match the metadata captured at backup time. Treated as a failed job.
+    StatusWarning Status = "warning"
 )
 
 type Trigger string
@@ -27,6 +30,7 @@ const (
     PhaseSnapshot  Phase = "snapshot"  // resolving the snapshot to restore
     PhaseProvision Phase = "provision" // starting the ephemeral container
     PhaseRestore   Phase = "restore"   // loading the database dump
+    PhaseValidate  Phase = "validate"  // comparing the restored database with the backup metadata
 )
 
 // ActivityKind tells what an activity row records.

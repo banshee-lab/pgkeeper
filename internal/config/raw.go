@@ -27,6 +27,10 @@ type rawGlobal struct {
 	// ToolsImage is the image of the one-shot container that runs the
 	// PostgreSQL client tools against remote servers (database-url).
 	ToolsImage string `toml:"tools-image"`
+
+	// Metadata toggles backup metadata capture and restore validation
+	// (default true).
+	Metadata *bool `toml:"metadata"`
 }
 
 type rawTelegram struct {

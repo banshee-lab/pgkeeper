@@ -2,7 +2,7 @@
 	import { StatusDot } from '@runwisp/ui';
 	import { statusLabel } from '#lib/format';
 
-	type Status = 'running' | 'success' | 'error' | 'never';
+	type Status = 'running' | 'success' | 'error' | 'warning' | 'never';
 
 	let { status }: { status: Status } = $props();
 
@@ -13,7 +13,9 @@
 				? 'success'
 				: status === 'error'
 					? 'danger'
-					: 'muted'
+					: status === 'warning'
+						? 'warning'
+						: 'muted'
 	);
 </script>
 

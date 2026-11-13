@@ -47,3 +47,37 @@ func TestRestoreArgs(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestBuildArgsSnapshot(t *testing.T) {
+	db := domain.DumpSpec{Kind: domain.DumpDatabase, Container: "pg", Database: "app", Host: "localhost", Username: "postgres", Port: 5432, SnapshotID: "00000003-0000001B-1"}
+	got, err := buildArgs(db)
+	if err != nil || got[len(got)-1] != "--snapshot=00000003-0000001B-1" {
+		t.Fatalf("got %q err=%v", got, err)
+	}
+	roles := db
+	roles.Kind = domain.DumpRoles
+	if got, _ := buildArgs(roles); slices.ContainsFunc(got, func(s string) bool { return len(s) > 10 && s[:10] == "--snapshot" }) {
+		t.Fatalf("roles dump must not use a snapshot: %q", got)
+	}
+	_, args, err := pgDumpToolArgs(db)
+	if err != nil || args[len(args)-1] != "--snapshot=00000003-0000001B-1" {
+		t.Fatalf("tools args %q err=%v", args, err)
+	}
+}
+
+func TestSnapshotWriterFindsIDAcrossChunks(t *testing.T) {
+	w := &snapshotWriter{found: make(chan string, 1)}
+	for _, chunk := range []string{"BEG", "IN\n0000000", "3-0000001B-1\nmore\n"} {
+		if n, err := w.Write([]byte(chunk)); err != nil || n != len(chunk) {
+			t.Fatal(n, err)
+		}
+	}
+	select {
+	case id := <-w.found:
+		if id != "00000003-0000001B-1" {
+			t.Fatalf("id = %q", id)
+		}
+	default:
+		t.Fatal("snapshot id not found")
+	}
+}

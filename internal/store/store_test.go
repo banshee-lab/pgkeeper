@@ -153,3 +153,23 @@ func TestRestoreActivitiesDoNotAffectBackupAggregates(t *testing.T) {
 		t.Fatalf("activity list must include restores, got %d", len(list))
 	}
 }
+
+func TestWarningStatusPersistsAndSurvivesMigration(t *testing.T) {
+	as, _ := newDB(t)
+	ctx := context.Background()
+	a := act("b1", time.Now().UTC().Truncate(time.Second))
+	if err := as.Create(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := as.Finish(ctx, a.ID, domain.StatusWarning, time.Now(), "restore ok, metadata validation found 1 mismatch"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := as.Get(ctx, a.ID)
+	if err != nil || got.Status != domain.StatusWarning || got.Error == "" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	// An interrupted-run sweep must not touch finished warnings.
+	if n, _ := as.MarkRunningAsInterrupted(ctx, time.Now()); n != 0 {
+		t.Fatalf("interrupted=%d", n)
+	}
+}

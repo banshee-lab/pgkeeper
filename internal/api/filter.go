@@ -40,7 +40,7 @@ func parseActivityFilter(r *http.Request) (domain.ActivityFilter, bool) {
 
 	if st := q.Get("status"); st != "" {
 		switch domain.Status(st) {
-		case domain.StatusRunning, domain.StatusSuccess, domain.StatusError:
+		case domain.StatusRunning, domain.StatusSuccess, domain.StatusError, domain.StatusWarning:
 			f.Status = domain.Status(st)
 		default:
 			return f, false

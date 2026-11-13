@@ -40,7 +40,11 @@ func toolsEnv(conn *domain.PGConn) []string {
 func pgDumpToolArgs(s domain.DumpSpec) (tool string, args []string, err error) {
 	switch s.Kind {
 	case domain.DumpDatabase:
-		return "pg_dump", []string{"--no-owner", "--disable-triggers", "--format=plain", "--no-password"}, nil
+		args = []string{"--no-owner", "--disable-triggers", "--format=plain", "--no-password"}
+		if s.SnapshotID != "" {
+			args = append(args, "--snapshot="+s.SnapshotID)
+		}
+		return "pg_dump", args, nil
 	case domain.DumpRoles:
 		args = []string{"--roles-only", "--no-password"}
 		if s.Conn != nil && s.Conn.Database != "" {

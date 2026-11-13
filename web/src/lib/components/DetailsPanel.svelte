@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Heading } from '@runwisp/ui';
 	import type { Backup } from '#lib/api/types';
-	import { cronText, formatBytes, formatDateTime, redactUrl, relativeShort } from '#lib/format';
+	import { cronText, formatBytes, formatDateTime, redactUrl, relativeShort, statusLabel } from '#lib/format';
 	import { backups } from '#lib/stores/backups.svelte';
 	import NextRun from './NextRun.svelte';
 	import StatusBullet from './StatusBullet.svelte';
@@ -26,7 +26,7 @@
 		<Heading level={2} size="sm">Details</Heading>
 		<span class="inline-flex items-center gap-2 font-mono text-xs text-on-surface-muted">
 			<StatusBullet {status} />
-			{status === 'running' ? 'Running' : status === 'success' ? 'Success' : status === 'error' ? 'Failed' : 'Never run'}
+			{statusLabel(status)}
 		</span>
 	</div>
 

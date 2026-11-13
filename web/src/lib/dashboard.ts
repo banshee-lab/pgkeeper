@@ -16,7 +16,7 @@ export interface DashboardSummary {
 }
 
 export function deriveDashboard(backups: Backup[]): DashboardSummary {
-	const failures = backups.filter((backup) => backup.last_activity?.status === 'error');
+	const failures = backups.filter((backup) => backup.last_activity?.status === 'error' || backup.last_activity?.status === 'warning');
 	const finished = backups
 		.map((backup) => backup.last_activity?.finished_at ?? null)
 		.filter((value): value is string => value !== null);

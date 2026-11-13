@@ -1,4 +1,4 @@
-export type ActivityStatus = 'running' | 'success' | 'error';
+export type ActivityStatus = 'running' | 'success' | 'error' | 'warning';
 export type Trigger = 'schedule' | 'manual';
 export type Phase =
 	| 'queued'
@@ -8,7 +8,8 @@ export type Phase =
 	| 'cleanup'
 	| 'snapshot'
 	| 'provision'
-	| 'restore';
+	| 'restore'
+	| 'validate';
 export type ActivityKind = 'backup' | 'test_restore' | 'restore';
 
 export interface Activity {

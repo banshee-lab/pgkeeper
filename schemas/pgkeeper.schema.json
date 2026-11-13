@@ -36,6 +36,11 @@
           "type": "string",
           "description": "Path to the SQLite database."
         },
+        "metadata": {
+          "type": "boolean",
+          "default": true,
+          "description": "Capture backup metadata (<database>.meta.json: object counts, exact row counts, sequence values) at dump time, and validate test and live restores against it. A mismatch ends the job with status warning."
+        },
         "tools-image": {
           "type": "string",
           "description": "Docker image providing pg_dump, pg_dumpall and psql (a postgres image or any custom image with the PostgreSQL client tools). Runs as a one-shot container for backups and restores of remote databases (database-url). Without it those are unavailable."

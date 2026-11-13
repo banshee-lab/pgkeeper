@@ -34,6 +34,7 @@ type Deps struct {
 	// Restore support (optional): without them restores fail with
 	// domain.ErrRestoreUnavailable and backups are unaffected.
 	RestoreExec domain.RestoreExecutor
+	Meta        domain.MetaExecutor // optional: backup metadata capture and restore validation
 	Inspector   domain.RepositoryInspector // lists and downloads restic snapshots
 
 	JobHub     *events.Hub[events.JobEvent]
@@ -265,14 +266,29 @@ func (r *Runner) execute(cfg domain.BackupConfig, act domain.Activity, work work
 	finished := r.Clock().UTC()
 	act.FinishedAt = &finished
 	act.Status = domain.StatusSuccess
+	var warn *domain.ValidationWarning
+	isWarning := errors.As(runErr, &warn) && ctx.Err() == nil
 	if runErr != nil {
 		act.Status = domain.StatusError
+		if isWarning {
+			act.Status = domain.StatusWarning
+		}
 		act.Error = runErr.Error()
 		if ctx.Err() != nil {
 			act.Error = "interrupted: " + act.Error
 		}
 	}
-	if runErr != nil {
+	if isWarning {
+		lg.Logf("WARN", "execution finished: status=warning err=%s", act.Error)
+		r.Logger.Warn(noun+" run completed with warnings",
+			"activity", act.ID,
+			"backup", cfg.Name,
+			"database", cfg.Database,
+			"trigger", act.TriggeredBy,
+			"duration", finished.Sub(act.StartedAt),
+			"log_path", act.LogPath,
+			"err", act.Error)
+	} else if runErr != nil {
 		lg.Logf("ERROR", "execution finished: status=error err=%s", act.Error)
 		r.Logger.Error(noun+" run failed",
 			"activity", act.ID,
@@ -380,13 +396,17 @@ func (r *Runner) runPhases(ctx context.Context, cfg domain.BackupConfig, act dom
 
 	dbName := safeName(cfg.Database)
 	files := []string{dbName + ".sql"}
-	if err := r.dump(ctx, cfg, act, lg, domain.PhaseDump, domain.DumpDatabase, filepath.Join(tmpDir, files[0])); err != nil {
+	withMeta, err := r.dumpDatabase(ctx, cfg, act, lg, filepath.Join(tmpDir, files[0]), filepath.Join(tmpDir, dbName+".meta.json"))
+	if err != nil {
 		return err
+	}
+	if withMeta {
+		files = append(files, dbName+".meta.json")
 	}
 	if cfg.Roles {
 		rolesFile := dbName + "_roles.sql"
 		files = append(files, rolesFile)
-		if err := r.dump(ctx, cfg, act, lg, domain.PhaseRoles, domain.DumpRoles, filepath.Join(tmpDir, rolesFile)); err != nil {
+		if err := r.dump(ctx, cfg, act, lg, domain.PhaseRoles, domain.DumpRoles, filepath.Join(tmpDir, rolesFile), ""); err != nil {
 			return err
 		}
 	}
@@ -394,7 +414,7 @@ func (r *Runner) runPhases(ctx context.Context, cfg domain.BackupConfig, act dom
 }
 
 func (r *Runner) dump(ctx context.Context, cfg domain.BackupConfig, act domain.Activity, lg execLog,
-	phase domain.Phase, kind domain.DumpKind, path string) (resultErr error) {
+	phase domain.Phase, kind domain.DumpKind, path, snapshotID string) (resultErr error) {
 
 	r.setPhase(cfg, act, phase)
 	if cfg.Conn != nil && cfg.ToolsImage == "" {
@@ -426,7 +446,7 @@ func (r *Runner) dump(ctx context.Context, cfg domain.BackupConfig, act domain.A
 		return fmt.Errorf("%s: %w", phase, err)
 	}
 	spec := domain.DumpSpec{Kind: kind, Container: cfg.Container, Database: cfg.Database,
-		Host: cfg.Host, Username: cfg.Username, Port: cfg.Port, Conn: cfg.Conn, Image: cfg.ToolsImage}
+		Host: cfg.Host, Username: cfg.Username, Port: cfg.Port, Conn: cfg.Conn, Image: cfg.ToolsImage, SnapshotID: snapshotID}
 	dumpErr := r.Exec.Dump(ctx, spec, f, lg)
 	closeErr := f.Close()
 	if dumpErr != nil {

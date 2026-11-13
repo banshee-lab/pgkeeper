@@ -44,6 +44,7 @@ type restorable struct {
 	domain.RestoreSnapshot
 	dbPath    string
 	rolesPath string
+	metaPath  string // empty for legacy backups made before metadata capture
 }
 
 func (r *Runner) restoreConfig(name string) (domain.BackupConfig, error) {
@@ -149,6 +150,7 @@ func (r *Runner) projectSnapshots(ctx context.Context, cfg domain.BackupConfig) 
 	}
 	dbFile := safeName(cfg.Database) + ".sql"
 	rolesFile := safeName(cfg.Database) + "_roles.sql"
+	metaFile := safeName(cfg.Database) + ".meta.json"
 	var out []restorable
 	for _, s := range all {
 		if s.Hostname != cfg.Name || !slices.Contains(s.Tags, cfg.ResticTag) {
@@ -163,6 +165,7 @@ func (r *Runner) projectSnapshots(ctx context.Context, cfg domain.BackupConfig) 
 			RestoreSnapshot: domain.RestoreSnapshot{ID: s.ID, ShortID: s.ShortID, Time: s.Time, HasRoles: rolesPath != ""},
 			dbPath:          dbPath,
 			rolesPath:       rolesPath,
+			metaPath:        findPath(s.Paths, metaFile),
 		})
 	}
 	slices.SortStableFunc(out, func(a, b restorable) int { return b.Time.Compare(a.Time) })
@@ -236,6 +239,8 @@ func (r *Runner) runRestore(ctx context.Context, cfg domain.BackupConfig, act do
 	dbLocal := filepath.Join(tmpDir, "database.sql")
 	rolesLocal := filepath.Join(tmpDir, "roles.sql")
 	rolesPrepared := filepath.Join(tmpDir, "roles.prepared.sql")
+	metaLocal := filepath.Join(tmpDir, "backup.meta.json")
+	var metaFetchErr error // reported as a validation warning, never fails the restore
 
 	// ---- snapshot ----
 	var snap restorable
@@ -254,10 +259,18 @@ func (r *Runner) runRestore(ctx context.Context, cfg domain.BackupConfig, act do
 			return fmt.Errorf("snapshot %s has no roles dump (the project needs roles = true)", snap.ShortID)
 		}
 		lg.Logf("INFO", "restoring snapshot %s taken %s (roles=%t)", snap.ShortID, snap.Time.UTC().Format(time.RFC3339), withRoles)
+		switch {
+		case !r.Global.Metadata || r.Meta == nil:
+			lg.Logf("INFO", "metadata validation disabled")
+		case snap.metaPath == "":
+			lg.Logf("INFO", "metadata validation skipped: snapshot %s has no metadata file (legacy backup)", snap.ShortID)
+		}
 		return nil
 	}); err != nil {
 		return err
 	}
+
+	validate := r.Global.Metadata && r.Meta != nil && snap.metaPath != ""
 
 	// ---- restic: fetch the dumps ----
 	if err := step(domain.PhaseRestic, func() error {
@@ -278,6 +291,13 @@ func (r *Runner) runRestore(ctx context.Context, cfg domain.BackupConfig, act do
 		}
 		if e := r.fetch(ctx, cfg, snap.ID, dbRemote, dbLocal, lg); e != nil {
 			return e
+		}
+		if validate {
+			if metaRemote, e := r.locateFile(ctx, cfg, snap.ID, path.Base(snap.metaPath)); e != nil {
+				metaFetchErr = e
+			} else if e := r.fetch(ctx, cfg, snap.ID, metaRemote, metaLocal, lg); e != nil {
+				metaFetchErr = e
+			}
 		}
 		if withRoles {
 			rolesRemote, e := r.locateFile(ctx, cfg, snap.ID, path.Base(snap.rolesPath))
@@ -339,7 +359,7 @@ func (r *Runner) runRestore(ctx context.Context, cfg domain.BackupConfig, act do
 	}
 
 	// ---- database ----
-	return step(domain.PhaseRestore, func() error {
+	if err := step(domain.PhaseRestore, func() error {
 		var sb strings.Builder
 		if !ephemeral {
 			lg.Logf("WARN", "dropping and recreating database %q on %s: its current data is replaced", dbName, where)
@@ -352,7 +372,13 @@ func (r *Runner) runRestore(ctx context.Context, cfg domain.BackupConfig, act do
 		}
 		target.Database = dbName
 		return r.psqlFile(ctx, target, dbLocal, lg)
-	})
+	}); err != nil {
+		return err
+	}
+	if !validate {
+		return nil
+	}
+	return r.validateRestore(ctx, cfg, act, lg, target, metaLocal, metaFetchErr)
 }
 
 // locateFile walks the snapshot tree breadth-first and returns the stored path

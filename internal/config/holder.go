@@ -2,6 +2,7 @@ package config
 
 import (
 	"reflect"
+	"strconv"
 	"sync/atomic"
 
 	"github.com/banshee-lab/pgkeeper/internal/domain"
@@ -45,6 +46,7 @@ func RestartRequired(cur, next *Config) []string {
 		{"global.log-path", g.LogPath, n.LogPath},
 		{"global.listen", g.Listen, n.Listen},
 		{"global.db-path", g.DBPath, n.DBPath},
+		{"global.metadata", strconv.FormatBool(g.Metadata), strconv.FormatBool(n.Metadata)},
 	} {
 		if c.old != c.new {
 			out = append(out, c.key)
