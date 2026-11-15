@@ -5,6 +5,7 @@ import type {
 	Backup,
 	BackupList,
 	ContainerRestoreRequest,
+	TestRestoreRequest,
 	Me,
 	Repository,
 	RepositoryActivity,
@@ -263,13 +264,21 @@ export async function listRestoreSnapshots(name: string): Promise<RestoreSnapsho
 	return result.items;
 }
 
-export async function startTestRestore(name: string): Promise<Activity> {
+/** Starts a manual test restore. Without snapshotId the latest snapshot is restored. */
+export async function startTestRestore(name: string, snapshotId?: string): Promise<Activity> {
 	if (mockEnabled) {
 		const activity = mockRestoreActivity(name, 'test_restore');
 		mockActivities.unshift(activity);
 		return structuredClone(activity);
 	}
-	return request<Activity>(`/api/v1/backups/${encodeURIComponent(name)}/restore/test`, { method: 'POST' });
+	const url = `/api/v1/backups/${encodeURIComponent(name)}/restore/test`;
+	if (!snapshotId) return request<Activity>(url, { method: 'POST' });
+	const body: TestRestoreRequest = { snapshot_id: snapshotId };
+	return request<Activity>(url, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body)
+	});
 }
 
 export async function startContainerRestore(name: string, body: ContainerRestoreRequest): Promise<Activity> {

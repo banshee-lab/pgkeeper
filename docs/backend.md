@@ -228,12 +228,14 @@ running returns `409` (`backup_running` / `restore_running`); scheduled runs
 skip with a warning. The dump files are fetched with `restic dump` while holding
 the shared per-repository gate, so restores queue with backups and maintenance.
 
-- **Test restore** (`POST …/restore/test`, or `restore-cron`): restores the
-  latest snapshot into a throw-away PostgreSQL container (`docker run --rm
+- **Test restore** (`POST …/restore/test`, or `restore-cron`): restores a
+  snapshot into a throw-away PostgreSQL container (`docker run --rm
   --network none`) built from the project's `restore-image`, else the global
   `[restore].restore-image`. The roles dump is applied too when the snapshot
   has one. The container is force-removed when the run ends, whatever the
-  outcome; leftovers of a crashed process are removed at startup.
+  outcome; leftovers of a crashed process are removed at startup. The manual
+  endpoint takes an optional `{"snapshot_id": "…"}` body (default: latest);
+  scheduled runs always use the latest snapshot.
 - **Restore to container** (`POST …/restore/container`): restores the chosen
   snapshot into any container/database (default: the project's own). The target
   database is **dropped and recreated**. With `include_roles` the roles dump is

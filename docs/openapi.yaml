@@ -207,12 +207,19 @@ paths:
       tags: [backups, restore]
       summary: Start a test restore into an ephemeral container
       description: >
-        Restores the latest snapshot into a throw-away PostgreSQL container
+        Restores a snapshot into a throw-away PostgreSQL container
         (image: the backup's `restore-image`, else the global
-        `[restore].restore-image`). The container is removed when the restore
-        ends, whatever the outcome. The execution is an activity of kind
-        `test_restore`; its log holds the full console output. Requires a
-        same-origin Origin or Referer header.
+        `[restore].restore-image`). The body is optional: without it, or with
+        an empty `snapshot_id`, the latest snapshot is restored. Scheduled
+        test restores (`restore-cron`) always use the latest snapshot. The
+        container is removed when the restore ends, whatever the outcome. The
+        execution is an activity of kind `test_restore`; its log holds the
+        full console output. Requires a same-origin Origin or Referer header.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TestRestoreRequest' }
       responses:
         '202':
           description: Accepted; execution started
@@ -797,6 +804,16 @@ components:
         timestamp: { type: string, format: date-time }
         has_roles: { type: boolean, description: The snapshot contains a roles dump }
 
+    TestRestoreRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        snapshot_id:
+          type: string
+          description: >
+            Full or short restic snapshot ID (from `restore/snapshots`).
+            Omitted or empty = latest snapshot.
+          example: bbbbbbbb
     ContainerRestoreRequest:
       type: object
       required: [snapshot_id]

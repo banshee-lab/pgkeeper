@@ -210,7 +210,7 @@ func (s *Cron) restoreTick(name string) {
 	if r == nil {
 		return
 	}
-	_, err := r.TestRestore(context.Background(), name, domain.TriggerSchedule)
+	_, err := r.TestRestore(context.Background(), name, domain.TriggerSchedule, "") // scheduled runs always use the latest snapshot
 	switch {
 	case err == nil:
 	case errors.Is(err, domain.ErrBackupRunning), errors.Is(err, domain.ErrRestoreRunning):
